@@ -1,5 +1,7 @@
 extern crate serde_json;
 
+use bitcoin::{Address, Network, OutPoint};
+use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use bitcoincore_rpc::{self, Client, RpcApi};
 use log::{error, info};
 use mongodb::bson::{doc, Document};
@@ -69,6 +71,9 @@ pub fn index_brc20(
                                     let pretty_json =
                                         serde_json::to_string(&data).unwrap_or_default();
                                     info!("Brc-20 data: {}", pretty_json);
+
+                                    // Get raw transaction info
+                                    let raw_tx_info = rpc.get_raw_transaction_info(&txid, None)?;
                                 }
                             }
                         }
@@ -158,4 +163,21 @@ fn extract_and_process_witness_data(witness_data: String) -> Option<serde_json::
     }
 
     None
+}
+
+pub(crate) fn get_owner_of_output(
+    outpoint: &OutPoint,
+    raw_tx_info: &GetRawTransactionResult,
+) -> Result<Address, Box<dyn std::error::Error>> {
+    // Get the controlling address of this output
+    let script_pubkey = &raw_tx_info.vout[outpoint.vout as usize].script_pub_key;
+    let this_address = Address::from_script(&script_pubkey.script().unwrap(), Network::Testnet)
+        .map_err(|_| {
+            println!("Couldn't derive address from scriptPubKey");
+            "Couldn't derive address from scriptPubKey"
+        })?;
+
+    // println!("Script Pub Key: {:?}", script_pubkey.asm);
+
+    Ok(this_address)
 }
