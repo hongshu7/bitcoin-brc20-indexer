@@ -2,6 +2,7 @@ extern crate serde_json;
 
 use bitcoincore_rpc::{self, Client, RpcApi};
 use log::{error, info};
+use mongodb::bson::{doc, Document};
 use serde::{Deserialize, Serialize};
 use std::thread::sleep;
 use std::time::Duration;
@@ -40,35 +41,6 @@ impl ToDocument for Brc20Inscription {
             "lim": &self.lim,
             "dec": &self.dec,
         }
-    }
-}
-
-fn get_witness_data_for_txid(
-    rpc: &Client,
-    txid: &str,
-) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    // Convert the transaction ID string to a `bitcoin::Txid`
-    let txid: Result<bitcoin::Txid, _> = txid.parse();
-
-    if let Ok(txid) = txid {
-        // Fetch the raw transaction hex
-        let raw_tx_info = rpc.get_raw_transaction_info(&txid, None)?;
-        let transaction = raw_tx_info.transaction()?;
-
-        let mut witness_data_strings: Vec<String> = Vec::new();
-
-        // Get the first transaction input
-        if let Some(input) = transaction.input.first() {
-            // Iterate through each witness of the input
-            for witness in &input.witness {
-                let witness_string = String::from_utf8_lossy(witness).into_owned();
-                witness_data_strings.push(witness_string);
-            }
-        }
-
-        Ok(witness_data_strings)
-    } else {
-        Err("Invalid transaction ID")?
     }
 }
 
@@ -122,6 +94,35 @@ pub fn index_brc20(
         }
     }
     Ok(())
+}
+
+fn get_witness_data_for_txid(
+    rpc: &Client,
+    txid: &str,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    // Convert the transaction ID string to a `bitcoin::Txid`
+    let txid: Result<bitcoin::Txid, _> = txid.parse();
+
+    if let Ok(txid) = txid {
+        // Fetch the raw transaction hex
+        let raw_tx_info = rpc.get_raw_transaction_info(&txid, None)?;
+        let transaction = raw_tx_info.transaction()?;
+
+        let mut witness_data_strings: Vec<String> = Vec::new();
+
+        // Get the first transaction input
+        if let Some(input) = transaction.input.first() {
+            // Iterate through each witness of the input
+            for witness in &input.witness {
+                let witness_string = String::from_utf8_lossy(witness).into_owned();
+                witness_data_strings.push(witness_string);
+            }
+        }
+
+        Ok(witness_data_strings)
+    } else {
+        Err("Invalid transaction ID")?
+    }
 }
 
 fn extract_and_process_witness_data(witness_data: String) -> Option<serde_json::Value> {
