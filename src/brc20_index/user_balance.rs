@@ -34,6 +34,16 @@ impl UserBalance {
             transfer_inscription.get_inscription_outpoint(),
             transfer_inscription.clone(),
         );
+
+        // display user overall balance
+        println!("User overall balance: {}", self.get_overall_balance());
+        // display user available balance
+        println!("User available balance: {}", self.get_available_balance());
+        // display user transferable balance
+        println!(
+            "User transferable balance: {}",
+            self.get_transferable_balance()
+        );
     }
 
     pub fn is_active_inscription(&self, outpoint: &OutPoint) -> bool {

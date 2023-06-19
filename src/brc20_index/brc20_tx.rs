@@ -61,14 +61,6 @@ impl Brc20Tx {
     pub fn get_blocktime(&self) -> u64 {
         self.blocktime
     }
-
-    pub fn get_inputs(&self) -> &Vec<GetRawTransactionResultVin> {
-        &self.inputs
-    }
-
-    pub fn get_inputs_len(&self) -> usize {
-        self.inputs.len()
-    }
 }
 
 impl fmt::Display for Brc20Tx {
@@ -80,11 +72,6 @@ impl fmt::Display for Brc20Tx {
         writeln!(f, "Inputs: {:?}", self.inputs)?;
         Ok(())
     }
-}
-
-enum Brc20Transaction {
-    Valid(Brc20Tx),
-    Invalid(InvalidBrc20Tx),
 }
 
 #[derive(Debug, Clone)]

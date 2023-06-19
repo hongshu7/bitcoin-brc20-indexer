@@ -60,26 +60,6 @@ impl Brc20MintTx {
         } else {
             let ticker = ticker_map.get_mut(&brc20_mint_tx.mint.tick).unwrap();
             ticker.add_mint(brc20_mint_tx.clone());
-
-            // Assume you have the user's address
-            let user_address = brc20_mint_tx.get_brc20_tx().get_owner();
-            if let Some(user_balance) = ticker.get_user_balance_mut(&user_address) {
-                user_balance.add_mint_tx(brc20_mint_tx.clone());
-            } else {
-                let mut new_user_balance = UserBalance::new();
-                new_user_balance.add_mint_tx(brc20_mint_tx.clone());
-                ticker.add_user_balance(user_address.clone(), new_user_balance);
-            }
-
-            if let Some(user_balance) = ticker.get_user_balance(&user_address) {
-                log::info!(
-                    "Minted tokens for user {}: overall balance = {}, available balance = {}, transferable balance = {}",
-                    user_address,
-                    user_balance.get_overall_balance(),
-                    user_balance.get_available_balance(),
-                    user_balance.get_transferable_balance()
-                );
-            }
         }
 
         Brc20MintTx {

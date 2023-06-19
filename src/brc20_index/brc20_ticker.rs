@@ -98,7 +98,7 @@ impl Brc20Ticker {
     }
 
     pub fn add_mint(&mut self, mint: Brc20MintTx) {
-        let owner = mint.get_brc20_tx().get_owner();
+        let owner = mint.get_brc20_tx().get_owner().clone();
         // add mint to UserBalance
         if let Some(balance) = self.balances.get_mut(&owner) {
             balance.add_mint_tx(mint.clone());
@@ -108,6 +108,16 @@ impl Brc20Ticker {
             self.balances.insert(owner.clone(), user_balance);
         }
         self.mints.push(mint);
+
+        if let Some(user_balance) = self.get_user_balance(&owner) {
+            log::info!(
+              "Minted tokens for user {}: overall balance = {}, available balance = {}, transferable balance = {}",
+              owner,
+              user_balance.get_overall_balance(),
+              user_balance.get_available_balance(),
+              user_balance.get_transferable_balance()
+          );
+        }
     }
 
     pub fn add_user_balance(&mut self, address: Address, balance: UserBalance) {
@@ -121,10 +131,6 @@ impl Brc20Ticker {
     // A method to get a mutable reference to a user's balance
     pub fn get_user_balance_mut(&mut self, address: &Address) -> Option<&mut UserBalance> {
         self.balances.get_mut(address)
-    }
-
-    pub fn add_transfer(&mut self, transfer: Brc20TransferTx) {
-        self.transfers.push(transfer);
     }
 
     pub fn get_total_supply(&self) -> f64 {

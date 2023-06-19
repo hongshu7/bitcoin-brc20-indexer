@@ -1,13 +1,12 @@
-use std::{collections::HashMap, fmt};
+use std::fmt;
 
 use bitcoin::{Address, OutPoint};
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    brc20_ticker::Brc20Ticker,
-    brc20_tx::{Brc20Tx, InvalidBrc20Tx, InvalidBrc20TxMap},
-    Brc20Inscription,
+    brc20_tx::{Brc20Tx, InvalidBrc20Tx},
+    Brc20Index, Brc20Inscription,
 };
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -55,11 +54,6 @@ impl Brc20TransferTx {
         &self.inscription_tx
     }
 
-    // get transfer tx
-    pub fn get_transfer_tx(&self) -> Option<&GetRawTransactionResult> {
-        self.transfer_tx.as_ref()
-    }
-
     // set transfer tx
     pub fn set_transfer_tx(mut self, transfer_tx: GetRawTransactionResult) -> Self {
         self.transfer_tx = Some(transfer_tx);
@@ -83,16 +77,12 @@ impl Brc20TransferTx {
         self.is_valid
     }
 
-    pub fn handle_inscribe_transfer_amount(
-        &mut self,
-        ticker_map: &mut HashMap<String, Brc20Ticker>,
-        invalid_tx_map: &mut InvalidBrc20TxMap,
-    ) {
+    pub fn handle_inscribe_transfer_amount(&mut self, index: &mut Brc20Index) {
         let owner = self.inscription_tx.get_owner();
         let ticker_symbol = &self.transfer_script.tick;
 
-        if let Some(ticker) = ticker_map.get_mut(ticker_symbol) {
-            if let Some(mut user_balance) = ticker.get_user_balance_mut(&owner) {
+        if let Some(ticker) = index.get_ticker_mut(ticker_symbol) {
+            if let Some(user_balance) = ticker.get_user_balance_mut(&owner) {
                 let transfer_amount = self
                     .transfer_script
                     .amt
@@ -111,17 +101,17 @@ impl Brc20TransferTx {
                 } else {
                     let reason = "Transfer amount exceeds available balance".to_string();
                     let invalid_tx = InvalidBrc20Tx::new(self.inscription_tx.clone(), reason);
-                    invalid_tx_map.add_invalid_tx(invalid_tx);
+                    index.invalid_tx_map.add_invalid_tx(invalid_tx);
                 }
             } else {
                 let reason = "User balance not found".to_string();
                 let invalid_tx = InvalidBrc20Tx::new(self.inscription_tx.clone(), reason);
-                invalid_tx_map.add_invalid_tx(invalid_tx);
+                index.invalid_tx_map.add_invalid_tx(invalid_tx);
             }
         } else {
             let reason = "Ticker not found".to_string();
             let invalid_tx = InvalidBrc20Tx::new(self.inscription_tx.clone(), reason);
-            invalid_tx_map.add_invalid_tx(invalid_tx);
+            index.invalid_tx_map.add_invalid_tx(invalid_tx);
         }
     }
 

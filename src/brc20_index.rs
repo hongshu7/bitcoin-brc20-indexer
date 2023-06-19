@@ -286,9 +286,16 @@ pub fn index_brc20(
                                                 Brc20TransferTx::new(brc20_tx, inscription);
 
                                             // Call handle_inscribe_transfer_amount
-                                            brc20_transfer_tx.handle_inscribe_transfer_amount(
-                                                &mut brc20_index.tickers,
-                                                &mut brc20_index.invalid_tx_map,
+                                            brc20_transfer_tx
+                                                .handle_inscribe_transfer_amount(&mut brc20_index);
+
+                                            // add to active transfer inscriptions for index
+                                            brc20_index.update_active_transfer_inscription(
+                                                brc20_transfer_tx.get_inscription_outpoint(),
+                                                brc20_transfer_tx
+                                                    .get_transfer_script()
+                                                    .tick
+                                                    .clone(),
                                             );
 
                                             // Check if the transfer is valid.
