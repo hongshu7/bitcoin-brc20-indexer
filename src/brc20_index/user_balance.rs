@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt};
 
-use bitcoin::OutPoint;
+use bitcoin::{Address, OutPoint};
 
 use super::{mint::Brc20MintTx, transfer::Brc20TransferTx};
 
@@ -89,47 +89,21 @@ impl UserBalance {
             .sum()
     }
 
-    //------------------------------------------------//
-    // IMPLEMENT THESE ONCE INDEXING SEND AND RECEIVE TXS IS IMPLEMENTED
-    // pub fn get_transfer_sends(&self) -> &Vec<Brc20TransferTx> {
-    //   &self.transfer_sends
-    // }
+    pub fn get_transfer_sends(&self) -> &Vec<Brc20TransferTx> {
+        &self.transfer_sends
+    }
 
-    // pub fn get_transfer_receives(&self) -> &Vec<Brc20TransferTx> {
-    //   &self.transfer_receives
-    // }
+    pub fn get_transfer_receives(&self) -> &Vec<Brc20TransferTx> {
+        &self.transfer_receives
+    }
 
-    // pub fn add_transfer_send(&mut self, transfer_send: Brc20TransferTx) {
-    //   self.transfer_sends.push(transfer_send);
-    // }
+    pub fn add_transfer_send(&mut self, transfer_send: Brc20TransferTx) {
+        self.transfer_sends.push(transfer_send);
+    }
 
-    // pub fn add_transfer_receive(&mut self, transfer_receive: Brc20TransferTx) {
-    //   self.transfer_receives.push(transfer_receive);
-    // }
-
-    //-----------------------------//
-    // MAY NOT NEED THESE FUNCTIONS
-    // pub fn get_available_balance(&self) -> f64 {
-    //   self.overall_balance - self.get_transferable_balance()
-    // }
-
-    // pub fn get_overall_balance(&self) -> f64 {
-    //   self.overall_balance
-    // }
-
-    // pub fn increase_overall_balance(&mut self, amount: f64) {
-    //   self.overall_balance += amount;
-    // }
-
-    // pub fn decrease_overall_balance(&mut self, amount: f64) -> Result<(), String> {
-    //   if self.overall_balance >= amount {
-    //     self.overall_balance -= amount;
-    //     Ok(())
-    //   } else {
-    //     Err("Decrease amount exceeds overall balance".to_string())
-    //   }
-    // }
-    //-----------------------------//
+    pub fn add_transfer_receive(&mut self, transfer_receive: Brc20TransferTx) {
+        self.transfer_receives.push(transfer_receive);
+    }
 }
 
 impl fmt::Display for UserBalance {
@@ -145,29 +119,33 @@ impl fmt::Display for UserBalance {
 
 // #[derive(Debug, Clone)]
 // pub struct Brc20Holder {
-//   address: Address,
-//   balance: UserBalance,
+//     address: Address,
+//     balance: UserBalance,
 // }
 
 // impl Brc20Holder {
-//   pub fn new(address: Address, initial_balance: u64) -> Self {
-//     Self {
-//       address,
-//       balance: UserBalance::new(initial_balance),
+//     pub fn new(address: Address) -> Self {
+//         Self {
+//             address,
+//             balance: UserBalance::new(),
+//         }
 //     }
-//   }
 
-//   pub fn get_address(&self) -> &Address {
-//     &self.address
-//   }
+//     pub fn get_address(&self) -> &Address {
+//         &self.address
+//     }
 
-//   pub fn get_user_balance(&self) -> &UserBalance {
-//     &self.balance
-//   }
+//     pub fn get_user_balance(&self) -> &UserBalance {
+//         &self.balance
+//     }
+
+//     pub fn get_user_balance_mut(&mut self) -> &mut UserBalance {
+//         &mut self.balance
+//     }
 // }
 
 // impl fmt::Display for Brc20Holder {
-//   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//     write!(f, "Address: {}, Balance: {}", self.address, self.balance)
-//   }
+//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+//         write!(f, "Address: {}, Balance: {}", self.address, self.balance)
+//     }
 // }

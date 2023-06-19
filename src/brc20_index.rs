@@ -1,6 +1,6 @@
 extern crate serde_json;
 
-use bitcoin::{Address, Network};
+use bitcoin::{Address, Network, OutPoint};
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use bitcoincore_rpc::{self, Client, RpcApi};
 use log::{error, info};
@@ -17,6 +17,7 @@ use crate::brc20_index::transfer::Brc20TransferTx;
 
 use self::brc20_ticker::Brc20Ticker;
 use self::brc20_tx::InvalidBrc20TxMap;
+use self::user_balance::UserBalance;
 
 mod brc20_ticker;
 mod brc20_tx;
@@ -35,14 +36,6 @@ pub struct Brc20Inscription {
     pub max: Option<String>,
     pub lim: Option<String>,
     pub dec: Option<String>,
-}
-
-impl Brc20Inscription {
-    fn is_valid(&self) -> bool {
-        // Put your validation logic here.
-        // This example checks if "op" is either "deploy" or "mint".
-        matches!(&self.op[..], "deploy" | "mint")
-    }
 }
 
 trait ToDocument {
@@ -68,18 +61,132 @@ impl ToDocument for Brc20Inscription {
 #[derive(Debug)]
 pub struct Brc20Index {
     // The BRC-20 tickers.
-    tickers: HashMap<String, Brc20Ticker>,
+    pub tickers: HashMap<String, Brc20Ticker>,
     // The invalid BRC-20 transactions.
-    invalid_tx_map: InvalidBrc20TxMap,
+    pub invalid_tx_map: InvalidBrc20TxMap,
+    // The active BRC-20 transfer inscriptions.
+    pub active_transfer_inscriptions: HashMap<OutPoint, String>,
 }
 
-// implement new() function for Brc20Index
 impl Brc20Index {
     pub fn new() -> Self {
         Brc20Index {
             tickers: HashMap::new(),
             invalid_tx_map: InvalidBrc20TxMap::new(),
+            active_transfer_inscriptions: HashMap::new(),
         }
+    }
+
+    pub fn process_active_transfer(
+        &mut self,
+        rpc: &Client,
+        raw_tx_info: &GetRawTransactionResult,
+    ) -> Result<(), anyhow::Error> {
+        let transaction = raw_tx_info.transaction()?;
+
+        for (input_index, input) in transaction.input.iter().enumerate() {
+            let outpoint = input.previous_output;
+            let ticker = match self.get_active_transfer_inscription_ticker(&outpoint) {
+                Some(ticker) => ticker,
+                None => {
+                    // log::error!(
+                    //     "No active transfer inscription for outpoint: {:?}",
+                    //     outpoint
+                    // );
+                    continue;
+                }
+            };
+
+            let brc20_ticker = match self.get_ticker_mut(&ticker) {
+                Some(brc20_ticker) => brc20_ticker,
+                None => {
+                    log::error!("Ticker {} not found", ticker);
+                    continue;
+                }
+            };
+
+            if !brc20_ticker.has_active_transfer_inscription(&outpoint) {
+                // log::error!(
+                //     "No user balance with active transfer inscription for outpoint: {:?}",
+                //     outpoint
+                // );
+                continue;
+            }
+
+            let brc20_transfer_tx =
+                match brc20_ticker.get_and_remove_active_transfer_inscription(&outpoint) {
+                    Some(brc20_transfer_tx) => brc20_transfer_tx,
+                    None => {
+                        // log::error!(
+                        //     "Active transfer inscription not found for outpoint: {:?}",
+                        //     outpoint
+                        // );
+                        continue;
+                    }
+                };
+
+            let proper_vout = if input_index == 0 {
+                0
+            } else {
+                // get values of all inputs only when necessary
+                let input_values =
+                    utils::transaction_inputs_to_values(rpc, &transaction.input[0..input_index])?;
+
+                let input_value_sum: u64 = input_values.iter().sum();
+                let proper_vout = transaction
+                    .output
+                    .iter()
+                    .scan(0, |acc, output| {
+                        *acc += output.value;
+                        Some(*acc)
+                    })
+                    .position(|value| value >= input_value_sum)
+                    .unwrap_or_else(|| transaction.output.len() - 1);
+
+                proper_vout
+            };
+
+            let receiver_address = get_owner_of_vout(&raw_tx_info, proper_vout)?;
+
+            // create transfer transaction
+            let brc20_transfer_tx = brc20_transfer_tx
+                .set_receiver(receiver_address.clone())
+                .set_transfer_tx(raw_tx_info.clone());
+
+            // Update user balances
+            brc20_ticker.update_transfer_receives(receiver_address, brc20_transfer_tx.clone());
+            brc20_ticker.update_transfer_sends(
+                brc20_transfer_tx
+                    .get_inscription_brc20_tx()
+                    .get_owner()
+                    .clone(),
+                brc20_transfer_tx,
+            );
+
+            self.remove_active_transfer_balance(&outpoint);
+        }
+
+        Ok(())
+    }
+
+    //Method to remove a ticker for a given outpoint
+    pub fn remove_active_transfer_balance(&mut self, outpoint: &OutPoint) {
+        self.active_transfer_inscriptions.remove(outpoint);
+    }
+
+    //method to return a ticker String for a given outpoint
+    pub fn get_active_transfer_inscription_ticker(&self, outpoint: &OutPoint) -> Option<String> {
+        self.active_transfer_inscriptions.get(outpoint).cloned()
+    }
+
+    // Method to add a ticker for a given txid and vout
+    pub fn update_active_transfer_inscription(&mut self, outpoint: OutPoint, ticker: String) {
+        self.active_transfer_inscriptions.insert(outpoint, ticker);
+    }
+
+    //get a mutable ticker struct for a given ticker string
+    pub fn get_ticker_mut(&mut self, ticker: &str) -> Option<&mut Brc20Ticker> {
+        self.tickers.get_mut(ticker)
     }
 }
 
@@ -205,6 +312,10 @@ pub fn index_brc20(
                                             error!("Unexpected operation: {}", inscription.op);
                                         }
                                     }
+                                } else {
+                                    // No inscription found
+                                    // check if the tx is sending a transfer inscription
+                                    brc20_index.process_active_transfer(&rpc, &raw_tx)?;
                                 }
                             }
                         }
@@ -300,11 +411,42 @@ pub fn get_owner_of_vout_0(
 
     // Get the controlling address of the first output
     let script_pubkey = &raw_tx_info.vout[0].script_pub_key;
-    let this_address = Address::from_script(&script_pubkey.script().unwrap(), Network::Testnet)
-        .map_err(|e| {
-            error!("Couldn't derive address from scriptPubKey: {:?}", e);
-            anyhow::anyhow!("Couldn't derive address from scriptPubKey: {:?}", e)
-        })?;
+    let script = match script_pubkey.script() {
+        Ok(script) => script,
+        Err(e) => return Err(anyhow::anyhow!("Failed to get script: {:?}", e)),
+    };
+    let this_address = Address::from_script(&script, Network::Bitcoin).map_err(|e| {
+        error!("Couldn't derive address from scriptPubKey: {:?}", e);
+        anyhow::anyhow!("Couldn't derive address from scriptPubKey: {:?}", e)
+    })?;
+
+    Ok(this_address)
+}
+
+pub fn get_owner_of_vout(
+    raw_tx_info: &GetRawTransactionResult,
+    vout_index: usize,
+) -> Result<Address, anyhow::Error> {
+    if raw_tx_info.vout.is_empty() {
+        return Err(anyhow::anyhow!("Transaction has no outputs"));
+    }
+
+    if raw_tx_info.vout.len() <= vout_index {
+        return Err(anyhow::anyhow!(
+            "Transaction doesn't have vout at given index"
+        ));
+    }
+
+    // Get the controlling address of the first output
+    let script_pubkey = &raw_tx_info.vout[vout_index].script_pub_key;
+    let script = match script_pubkey.script() {
+        Ok(script) => script,
+        Err(e) => return Err(anyhow::anyhow!("Failed to get script: {:?}", e)),
+    };
+    let this_address = Address::from_script(&script, Network::Bitcoin).map_err(|e| {
+        error!("Couldn't derive address from scriptPubKey: {:?}", e);
+        anyhow::anyhow!("Couldn't derive address from scriptPubKey: {:?}", e)
+    })?;
 
     Ok(this_address)
 }

@@ -1,5 +1,5 @@
 use bitcoin::{Address, Network, OutPoint, TxIn, TxOut};
-use bitcoincore_rpc::{bitcoincore_rpc_json::GetRawTransactionResult, RpcApi};
+use bitcoincore_rpc::{bitcoincore_rpc_json::GetRawTransactionResult, Client, RpcApi};
 
 pub fn convert_to_float(number_string: &str, decimals: u8) -> Result<f64, &'static str> {
     let parts: Vec<&str> = number_string.split('.').collect();
@@ -69,45 +69,92 @@ pub fn convert_to_float(number_string: &str, decimals: u8) -> Result<f64, &'stat
 //   Ok(())
 // }
 
-// fn transaction_inputs_to_addresses_values(
-//   index: &Index,
-//   inputs: &Vec<TxIn>,
-// ) -> Result<Vec<(Address, u64)>, Box<dyn std::error::Error>> {
-//   let mut addresses_values: Vec<(Address, u64)> = vec![];
+fn transaction_inputs_to_addresses_values(
+    client: &Client,
+    inputs: &Vec<TxIn>,
+) -> Result<Vec<(Address, u64)>, Box<dyn std::error::Error>> {
+    let mut addresses_values: Vec<(Address, u64)> = vec![];
 
-//   for input in inputs {
-//     let prev_output = input.previous_output;
-//     println!(
-//       "Input from transaction: {:?}, index: {:?}",
-//       prev_output.txid, prev_output.vout
-//     );
+    for input in inputs {
+        let prev_output = input.previous_output;
+        println!(
+            "Input from transaction: {:?}, index: {:?}",
+            prev_output.txid, prev_output.vout
+        );
 
-//     let prev_tx_info = index
-//       .client
-//       .get_raw_transaction_info(&prev_output.txid, None)?;
+        let prev_tx_info = client.get_raw_transaction_info(&prev_output.txid, None)?;
 
-//     let prev_tx = prev_tx_info.transaction()?;
+        let prev_tx = prev_tx_info.transaction()?;
 
-//     let output = &prev_tx.output[usize::try_from(prev_output.vout).unwrap()];
-//     let script_pub_key = &output.script_pubkey;
+        let output = &prev_tx.output[usize::try_from(prev_output.vout).unwrap()];
+        let script_pub_key = &output.script_pubkey;
 
-//     let address = Address::from_script(&script_pub_key, Network::Testnet).map_err(|_| {
-//       println!("Couldn't derive address from scriptPubKey");
-//       "Couldn't derive address from scriptPubKey"
-//     })?;
+        let address = Address::from_script(&script_pub_key, Network::Bitcoin).map_err(|_| {
+            println!("Couldn't derive address from scriptPubKey");
+            "Couldn't derive address from scriptPubKey"
+        })?;
 
-//     // Add both the address and the value of the output to the list
-//     addresses_values.push((address, output.value));
+        // Add both the address and the value of the output to the list
+        addresses_values.push((address, output.value));
 
-//     println!("=====");
-//   }
+        println!("=====");
+    }
 
-//   if addresses_values.is_empty() {
-//     Err("Couldn't derive any addresses or values from scriptPubKeys".into())
-//   } else {
-//     Ok(addresses_values)
-//   }
-// }
+    if addresses_values.is_empty() {
+        Err("Couldn't derive any addresses or values from scriptPubKeys".into())
+    } else {
+        Ok(addresses_values)
+    }
+}
+
+pub fn transaction_inputs_to_values(client: &Client, inputs: &[TxIn]) -> anyhow::Result<Vec<u64>> {
+    let mut values: Vec<u64> = vec![];
+
+    for input in inputs {
+        let prev_output = input.previous_output;
+        println!(
+            "Input from transaction: {:?}, index: {:?}",
+            prev_output.txid, prev_output.vout
+        );
+
+        let prev_tx_info = client.get_raw_transaction_info(&prev_output.txid, None)?;
+
+        let prev_tx = prev_tx_info.transaction()?;
+
+        let output = &prev_tx.output[usize::try_from(prev_output.vout).unwrap()];
+
+        // Add both the address and the value of the output to the list
+        values.push(output.value);
+
+        println!("=====");
+    }
+
+    if values.is_empty() {
+        return Err(anyhow::anyhow!("Couldn't derive any values from inputs"));
+    } else {
+        Ok(values)
+    }
+}
+
+// get the address and value of the outpoint
+pub fn outpoint_to_address_value(
+    client: &Client,
+    outpoint: &OutPoint,
+) -> Result<(Address, u64), Box<dyn std::error::Error>> {
+    let prev_tx_info = client.get_raw_transaction_info(&outpoint.txid, None)?;
+
+    let prev_tx = prev_tx_info.transaction()?;
+
+    let output = &prev_tx.output[usize::try_from(outpoint.vout).unwrap()];
+    let script_pub_key = &output.script_pubkey;
+
+    let address = Address::from_script(&script_pub_key, Network::Bitcoin).map_err(|_| {
+        println!("Couldn't derive address from scriptPubKey");
+        "Couldn't derive address from scriptPubKey"
+    })?;
+
+    Ok((address, output.value))
+}
 
 fn transaction_outputs_to_addresses_values(
     outputs: &Vec<TxOut>,
@@ -117,7 +164,7 @@ fn transaction_outputs_to_addresses_values(
     for output in outputs {
         let script_pub_key = &output.script_pubkey;
 
-        if let Ok(address) = Address::from_script(&script_pub_key, Network::Testnet) {
+        if let Ok(address) = Address::from_script(&script_pub_key, Network::Bitcoin) {
             // Add both the address and the value of the output to the list
             addresses_values.push((address, output.value));
         } else {

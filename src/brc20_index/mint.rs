@@ -1,50 +1,14 @@
 use std::{collections::HashMap, fmt};
 
-use serde::{Deserialize, Serialize};
-
 use super::{
     brc20_ticker::Brc20Ticker,
     brc20_tx::{Brc20Tx, InvalidBrc20Tx, InvalidBrc20TxMap},
+    user_balance::UserBalance,
     utils::convert_to_float,
     Brc20Inscription,
 };
 
 impl Brc20MintTx {
-    /// Validates a BRC20 mint transaction.
-    ///
-    /// The function takes in a reference to a BRC20 transaction, a mutable reference to a ticker map,
-    /// and a mutable reference to an invalid transaction map.
-    /// The ticker map is a `HashMap` that maps a ticker symbol string to a BRC20Ticker object.
-    /// The invalid transaction map is a map that associates invalid BRC20 transactions with a reason for their invalidity.
-    ///
-    /// It begins by creating a new BRC20MintTx from the provided BRC20 transaction.
-    ///
-    /// Then, it checks if the ticker symbol for the mint operation exists in the ticker map.
-    ///
-    /// If it does, it gets the mint limit, maximum supply, total minted amount, and decimal places for the ticker,
-    /// and then converts the amount to be minted into a floating point number using these values.
-    ///
-    /// If the amount to be minted exceeds the limit, it marks the transaction as invalid and sets the reason for invalidity
-    /// as "Mint amount exceeds limit".
-    ///
-    /// If the sum of the total minted amount and the amount to be minted exceeds the maximum supply,
-    /// it adjusts the mint amount to the remaining supply, and sets a warning reason.
-    ///
-    /// If there's an error in conversion (e.g., the amount is not a valid number), it marks the transaction as invalid
-    /// and sets the reason for invalidity as the error message.
-    ///
-    /// If the ticker symbol does not exist in the ticker map, it marks the transaction as invalid
-    /// and sets the reason for invalidity as "Ticker symbol does not exist".
-    ///
-    /// If the transaction is marked as invalid (i.e., the `is_valid` flag is `false`),
-    /// it creates a new `InvalidBrc20Tx` object, associates it with the reason for invalidity,
-    /// and adds it to the invalid transaction map.
-    ///
-    /// If the transaction is valid, it retrieves the ticker object from the ticker map again,
-    /// and updates the ticker with the mint operation.
-    ///
-    /// Finally, it returns a `Brc20MintTx` object with the original transaction, the mint details,
-    /// the computed or adjusted amount, and the validity flag.
     pub fn validate_mint<'a>(
         self,
         brc20_tx: &'a Brc20Tx,
@@ -94,11 +58,28 @@ impl Brc20MintTx {
             let invalid_tx = InvalidBrc20Tx::new(brc20_mint_tx.get_brc20_tx().clone(), reason);
             invalid_tx_map.add_invalid_tx(invalid_tx);
         } else {
-            // update the ticker
             let ticker = ticker_map.get_mut(&brc20_mint_tx.mint.tick).unwrap();
-
-            // Update the ticker struct with the mint operation.
             ticker.add_mint(brc20_mint_tx.clone());
+
+            // Assume you have the user's address
+            let user_address = brc20_mint_tx.get_brc20_tx().get_owner();
+            if let Some(user_balance) = ticker.get_user_balance_mut(&user_address) {
+                user_balance.add_mint_tx(brc20_mint_tx.clone());
+            } else {
+                let mut new_user_balance = UserBalance::new();
+                new_user_balance.add_mint_tx(brc20_mint_tx.clone());
+                ticker.add_user_balance(user_address.clone(), new_user_balance);
+            }
+
+            if let Some(user_balance) = ticker.get_user_balance(&user_address) {
+                log::info!(
+                    "Minted tokens for user {}: overall balance = {}, available balance = {}, transferable balance = {}",
+                    user_address,
+                    user_balance.get_overall_balance(),
+                    user_balance.get_available_balance(),
+                    user_balance.get_transferable_balance()
+                );
+            }
         }
 
         Brc20MintTx {
