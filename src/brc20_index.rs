@@ -17,7 +17,6 @@ use crate::brc20_index::transfer::Brc20TransferTx;
 
 use self::brc20_ticker::Brc20Ticker;
 use self::brc20_tx::InvalidBrc20TxMap;
-use self::user_balance::UserBalance;
 
 mod brc20_ticker;
 mod brc20_tx;
@@ -221,9 +220,9 @@ pub fn index_brc20(
                                 if let Some(inscription) = extract_and_process_witness_data(witness)
                                 {
                                     // print pretty json
-                                    let pretty_json =
-                                        serde_json::to_string(&inscription).unwrap_or_default();
-                                    info!("Brc-20 data: {}", pretty_json);
+                                    // let pretty_json =
+                                    //     serde_json::to_string(&inscription).unwrap_or_default();
+                                    // info!("Brc-20 data: {}", pretty_json);
 
                                     // get owner address, inscription is first satoshi of first output
                                     let owner = get_owner_of_vout_0(&raw_tx)?;
