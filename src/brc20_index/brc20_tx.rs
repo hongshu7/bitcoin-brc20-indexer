@@ -3,6 +3,8 @@ use bitcoincore_rpc::bitcoincore_rpc_json::{GetRawTransactionResult, GetRawTrans
 use serde::Serialize;
 use std::{collections::HashMap, fmt, fs::File, io::Write};
 
+use super::Brc20Inscription;
+
 /// Brc20Tx represents a transaction containing a BRC20 inscription
 /// the owner is the address that owns the BRC20 inscribed satoshi
 /// which is represented by the first satoshi of vout[0]
@@ -85,19 +87,25 @@ impl fmt::Display for Brc20Tx {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct InvalidBrc20Tx {
-    pub brc20_tx: Brc20Tx,
+    pub tx_id: Txid,
+    pub inscription: Brc20Inscription,
     pub reason: String,
 }
 
 impl InvalidBrc20Tx {
-    pub fn new(brc20_tx: Brc20Tx, reason: String) -> Self {
-        InvalidBrc20Tx { brc20_tx, reason }
+    pub fn new(tx_id: Txid, inscription: Brc20Inscription, reason: String) -> Self {
+        InvalidBrc20Tx {
+            tx_id,
+            inscription,
+            reason,
+        }
     }
 }
 
 impl fmt::Display for InvalidBrc20Tx {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Brc20 Transaction: {}", self.brc20_tx)?;
+        writeln!(f, "Brc20 Transaction id: {}", self.tx_id)?;
+        writeln!(f, "Inscription: {}", self.inscription)?;
         writeln!(f, "Reason: {}", self.reason)?;
         Ok(())
     }
@@ -128,7 +136,7 @@ impl InvalidBrc20TxMap {
     }
 
     pub fn add_invalid_tx(&mut self, invalid_tx: InvalidBrc20Tx) {
-        let tx_id = invalid_tx.brc20_tx.tx_id;
+        let tx_id = invalid_tx.tx_id;
         self.map.insert(tx_id, invalid_tx);
     }
 }

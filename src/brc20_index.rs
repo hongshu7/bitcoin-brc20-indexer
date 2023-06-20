@@ -54,6 +54,17 @@ impl ToDocument for Brc20Inscription {
     }
 }
 
+//implement Display for Brc20Inscription
+impl std::fmt::Display for Brc20Inscription {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "p: {}, op: {}, tick: {}, amt: {:?}, max: {:?}, lim: {:?}, dec: {:?}",
+            self.p, self.op, self.tick, self.amt, self.max, self.lim, self.dec
+        )
+    }
+}
+
 // Brc20Index is a struct that represents the
 // all Brc 20 Tickers and invalid Brc 20 Txs.
 #[derive(Debug)]
@@ -283,14 +294,16 @@ pub fn index_brc20(
         }
     }
 
+    //Log Tickers to file
     let result = write_tickers_to_file(&brc20_index.tickers, "tickers");
-
     match result {
         Ok(()) => println!("Successfully wrote tickers to files."),
         Err(e) => println!("An error occurred while writing tickers to files: {:?}", e),
     }
 
-    let result = brc20_index.dump_invalid_txs_to_file("invalid_txs.json");
+    // Log Invalids to file
+    DirBuilder::new().recursive(true).create("invalid_txs")?;
+    let result = brc20_index.dump_invalid_txs_to_file("invalid_txs/invalid_txs.json");
     match result {
         Ok(()) => println!("Successfully dumped invalid transactions to file."),
         Err(e) => println!(

@@ -93,7 +93,11 @@ impl Brc20DeployTx {
 
         if !valid_deploy_tx.is_valid() {
             let reason = reasons.join("; ");
-            let invalid_tx = InvalidBrc20Tx::new(valid_deploy_tx.get_brc20_tx().clone(), reason);
+            let invalid_tx = InvalidBrc20Tx::new(
+                *valid_deploy_tx.get_brc20_tx().get_txid(),
+                valid_deploy_tx.deploy_script.clone(),
+                reason,
+            );
             invalid_tx_map.add_invalid_tx(invalid_tx);
         }
 

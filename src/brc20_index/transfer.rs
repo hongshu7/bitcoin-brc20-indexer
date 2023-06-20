@@ -98,17 +98,29 @@ impl Brc20TransferTx {
                     user_balance.add_transfer_inscription(self.clone());
                 } else {
                     let reason = "Transfer amount exceeds available balance".to_string();
-                    let invalid_tx = InvalidBrc20Tx::new(self.inscription_tx.clone(), reason);
+                    let invalid_tx = InvalidBrc20Tx::new(
+                        *self.inscription_tx.get_txid(),
+                        self.transfer_script.clone(),
+                        reason,
+                    );
                     index.invalid_tx_map.add_invalid_tx(invalid_tx);
                 }
             } else {
                 let reason = "User balance not found".to_string();
-                let invalid_tx = InvalidBrc20Tx::new(self.inscription_tx.clone(), reason);
+                let invalid_tx = InvalidBrc20Tx::new(
+                    *self.inscription_tx.get_txid(),
+                    self.transfer_script.clone(),
+                    reason,
+                );
                 index.invalid_tx_map.add_invalid_tx(invalid_tx);
             }
         } else {
             let reason = "Ticker not found".to_string();
-            let invalid_tx = InvalidBrc20Tx::new(self.inscription_tx.clone(), reason);
+            let invalid_tx = InvalidBrc20Tx::new(
+                *self.inscription_tx.get_txid(),
+                self.transfer_script.clone(),
+                reason,
+            );
             index.invalid_tx_map.add_invalid_tx(invalid_tx);
         }
     }
