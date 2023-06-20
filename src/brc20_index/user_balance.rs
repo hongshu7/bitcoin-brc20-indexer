@@ -45,20 +45,12 @@ impl UserBalance {
         );
     }
 
-    pub fn is_active_inscription(&self, outpoint: &OutPoint) -> bool {
-        self.active_transfer_inscriptions.contains_key(&outpoint)
-    }
-
     pub fn remove_inscription(&mut self, outpoint: &OutPoint) -> Option<Brc20TransferTx> {
         self.active_transfer_inscriptions.remove(&outpoint)
     }
 
     pub fn add_mint_tx(&mut self, mint: Brc20MintTx) {
         self.mints.push(mint);
-    }
-
-    pub fn get_mint_txs(&self) -> &Vec<Brc20MintTx> {
-        &self.mints
     }
 
     // get active transfer inscriptions
@@ -98,14 +90,6 @@ impl UserBalance {
             .sum()
     }
 
-    pub fn get_transfer_sends(&self) -> &Vec<Brc20TransferTx> {
-        &self.transfer_sends
-    }
-
-    pub fn get_transfer_receives(&self) -> &Vec<Brc20TransferTx> {
-        &self.transfer_receives
-    }
-
     pub fn add_transfer_send(&mut self, transfer_send: Brc20TransferTx) {
         self.transfer_sends.push(transfer_send);
     }
@@ -125,36 +109,3 @@ impl fmt::Display for UserBalance {
         Ok(())
     }
 }
-
-// #[derive(Debug, Clone)]
-// pub struct Brc20Holder {
-//     address: Address,
-//     balance: UserBalance,
-// }
-
-// impl Brc20Holder {
-//     pub fn new(address: Address) -> Self {
-//         Self {
-//             address,
-//             balance: UserBalance::new(),
-//         }
-//     }
-
-//     pub fn get_address(&self) -> &Address {
-//         &self.address
-//     }
-
-//     pub fn get_user_balance(&self) -> &UserBalance {
-//         &self.balance
-//     }
-
-//     pub fn get_user_balance_mut(&mut self) -> &mut UserBalance {
-//         &mut self.balance
-//     }
-// }
-
-// impl fmt::Display for Brc20Holder {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//         write!(f, "Address: {}, Balance: {}", self.address, self.balance)
-//     }
-// }
