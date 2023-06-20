@@ -2,8 +2,9 @@ use super::{
     brc20_ticker::Brc20Ticker,
     brc20_tx::{Brc20Tx, InvalidBrc20Tx, InvalidBrc20TxMap},
     utils::convert_to_float,
-    Brc20Inscription,
+    Brc20Index, Brc20Inscription,
 };
+use log::info;
 use serde::Serialize;
 use std::{collections::HashMap, fmt};
 
@@ -119,4 +120,26 @@ impl fmt::Display for Brc20MintTx {
         writeln!(f, "Is Valid: {}", self.is_valid)?;
         Ok(())
     }
+}
+
+pub fn handle_mint_operation(
+    inscription: Brc20Inscription,
+    brc20_tx: &Brc20Tx,
+    brc20_index: &mut Brc20Index,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let validated_mint_tx = Brc20MintTx::new(&brc20_tx, inscription).validate_mint(
+        &brc20_tx,
+        &mut brc20_index.tickers,
+        &mut brc20_index.invalid_tx_map,
+    );
+
+    // Check if the mint operation is valid.
+    if validated_mint_tx.is_valid() {
+        info!("Mint: {:?}", validated_mint_tx.get_mint());
+        info!(
+            "Owner Address: {:?}",
+            validated_mint_tx.get_brc20_tx().get_owner()
+        );
+    }
+    Ok(())
 }
