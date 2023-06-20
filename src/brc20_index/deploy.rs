@@ -1,5 +1,7 @@
 use super::brc20_tx::{Brc20Tx, InvalidBrc20Tx, InvalidBrc20TxMap};
+use super::Brc20Index;
 use super::{brc20_ticker::Brc20Ticker, utils::convert_to_float, Brc20Inscription};
+use log::info;
 use serde::Serialize;
 use std::{collections::HashMap, fmt};
 
@@ -166,6 +168,24 @@ impl Brc20DeployTx {
             None => Ok(max),
         }
     }
+}
+
+pub fn handle_deploy_operation(
+    inscription: Brc20Inscription,
+    brc20_tx: Brc20Tx,
+    brc20_index: &mut Brc20Index,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let validated_deploy_tx = Brc20DeployTx::new(brc20_tx, inscription)
+        .validate_deploy_script(&mut brc20_index.invalid_tx_map, &brc20_index.tickers);
+
+    if validated_deploy_tx.is_valid() {
+        info!("Deploy: {:?}", validated_deploy_tx.get_deploy_script());
+
+        // Instantiate a new `Brc20Ticker` struct and update the hashmap with the deploy information.
+        let ticker = Brc20Ticker::new(validated_deploy_tx);
+        brc20_index.tickers.insert(ticker.get_ticker(), ticker);
+    }
+    Ok(())
 }
 
 // A helper function to find out the decimal places of the given float

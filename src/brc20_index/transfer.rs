@@ -4,6 +4,7 @@ use super::{
 };
 use bitcoin::{Address, OutPoint};
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
+use log::info;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -63,10 +64,6 @@ impl Brc20TransferTx {
         self.inscription_tx.get_outpoint()
     }
 
-    //   pub fn get_receiver(&self) -> Option<&Address> {
-    //     &self.receiver
-    //   }
-
     pub fn get_amount(&self) -> f64 {
         self.amount
     }
@@ -125,21 +122,6 @@ impl Brc20TransferTx {
         }
     }
 
-    /// Sets the validity of the transfer.
-    ///
-    /// # Arguments
-    ///
-    /// * `is_valid` - A bool indicating the validity of the transfer.
-    pub fn set_validity(mut self, is_valid: bool) -> Self {
-        self.is_valid = is_valid;
-        self
-    }
-
-    /// Sets the receiver address.
-    ///
-    /// # Arguments
-    ///
-    /// * `receiver` - An optional `Address` representing the receiver address.
     pub fn set_receiver(mut self, receiver: Address) -> Self {
         self.receiver = Some(receiver);
         self
@@ -156,4 +138,28 @@ impl fmt::Display for Brc20TransferTx {
         writeln!(f, "Is Valid: {}", self.is_valid)?;
         Ok(())
     }
+}
+
+pub fn handle_transfer_operation(
+    inscription: Brc20Inscription,
+    brc20_tx: Brc20Tx,
+    brc20_index: &mut Brc20Index,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut brc20_transfer_tx = Brc20TransferTx::new(brc20_tx, inscription);
+
+    brc20_transfer_tx.handle_inscribe_transfer_amount(brc20_index);
+
+    brc20_index.update_active_transfer_inscription(
+        brc20_transfer_tx.get_inscription_outpoint(),
+        brc20_transfer_tx.get_transfer_script().tick.clone(),
+    );
+
+    if brc20_transfer_tx.is_valid() {
+        info!("Transfer: {:?}", brc20_transfer_tx.get_transfer_script());
+        info!(
+            "Owner Address: {:?}",
+            brc20_transfer_tx.get_inscription_brc20_tx().get_owner()
+        );
+    }
+    Ok(())
 }

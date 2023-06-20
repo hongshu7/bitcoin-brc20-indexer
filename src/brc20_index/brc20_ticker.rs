@@ -5,6 +5,14 @@ use bitcoin::{Address, OutPoint};
 use serde::Serialize;
 use std::collections::HashMap;
 
+// methods implement various functionality for the Brc20Ticker, such as:
+//  - checking if a user has an active transfer inscription
+//  - getting and removing active transfer inscriptions
+//  - updating transfer sends and receives
+//  - adding mint transactions
+//  - getting balances, mint transactions, transfer transactions, etc.
+//  - adding user balance
+//  - displaying BRC20 ticker info
 #[derive(Debug, Clone, Serialize)]
 pub struct Brc20Ticker {
     ticker: String,
@@ -38,6 +46,8 @@ impl Brc20Ticker {
         }
     }
 
+    // Checks whether any balance in this Brc20Ticker has an active transfer inscription
+    // for the provided outpoint. Returns true if at least one balance does, false otherwise.
     pub fn has_active_transfer_inscription(&self, outpoint: &OutPoint) -> bool {
         self.balances.values().any(|balance| {
             balance
@@ -46,7 +56,9 @@ impl Brc20Ticker {
         })
     }
 
-    // get and remove active transfer inscription from Brc20Ticker
+    // Searches for an active transfer inscription for the provided outpoint in all the balances.
+    // If it finds it, it removes the inscription from the balance and returns the associated
+    // Brc20TransferTx. If no such inscription is found, it returns None.
     pub fn get_and_remove_active_transfer_inscription(
         &mut self,
         outpoint: &OutPoint,
@@ -56,6 +68,8 @@ impl Brc20Ticker {
             .find_map(|balance| balance.remove_inscription(outpoint))
     }
 
+    // Updates the sender's balance after a transfer send operation. It either adds the transaction
+    // to an existing balance or creates a new balance for the sender if it doesn't already exist.
     pub fn update_transfer_sends(&mut self, sender: Address, tx: Brc20TransferTx) {
         if let Some(user_balance) = self.balances.get_mut(&sender) {
             user_balance.add_transfer_send(tx.clone());
@@ -65,6 +79,7 @@ impl Brc20Ticker {
             self.balances.insert(sender.clone(), new_user_balance);
         }
 
+        // log to console
         if let Some(user_balance) = self.balances.get(&sender) {
             log::info!(
               "Transfer send from user {}: overall balance = {}, available balance = {}, transferable balance = {}",
@@ -76,6 +91,8 @@ impl Brc20Ticker {
         }
     }
 
+    // Updates the receiver's balance after a transfer receive operation. It either adds the transaction
+    // to an existing balance or creates a new balance for the receiver if it doesn't already exist.
     pub fn update_transfer_receives(&mut self, receiver: Address, tx: Brc20TransferTx) {
         if let Some(user_balance) = self.balances.get_mut(&receiver) {
             user_balance.add_transfer_receive(tx.clone());
@@ -85,6 +102,7 @@ impl Brc20Ticker {
             self.balances.insert(receiver.clone(), new_user_balance);
         }
 
+        // log to console
         if let Some(user_balance) = self.balances.get(&receiver) {
             log::info!(
               "Transfer received for user {}: overall balance = {}, available balance = {}, transferable balance = {}",
@@ -96,6 +114,8 @@ impl Brc20Ticker {
         }
     }
 
+    // Adds a mint transaction to the owner's balance. If the owner's balance doesn't exist yet, it
+    // creates a new one. Also updates the total minted tokens for this Brc20Ticker.
     pub fn add_mint(&mut self, mint: Brc20MintTx) {
         let owner = mint.get_brc20_tx().get_owner().clone();
         // add mint to UserBalance
@@ -116,16 +136,17 @@ impl Brc20Ticker {
               user_balance.get_available_balance(),
               user_balance.get_transferable_balance()
           );
+            log::info!(
+                "Total minted tokens for ticker {}:  {}",
+                self.ticker,
+                self.get_total_supply()
+            );
         }
     }
 
     // get balances
     pub fn get_balances(&self) -> &HashMap<Address, UserBalance> {
         &self.balances
-    }
-
-    pub fn add_user_balance(&mut self, address: Address, balance: UserBalance) {
-        self.balances.insert(address, balance);
     }
 
     pub fn get_user_balance(&self, address: &Address) -> Option<&UserBalance> {
@@ -137,21 +158,9 @@ impl Brc20Ticker {
         self.balances.get_mut(address)
     }
 
-    pub fn get_total_supply(&self) -> f64 {
-        self.total_minted
-    }
-
     // get total_minted from mints
-    pub fn get_total_minted_from_mint_txs(&self) -> f64 {
+    pub fn get_total_supply(&self) -> f64 {
         self.mints.iter().map(|mint| mint.get_amount()).sum()
-    }
-
-    pub fn get_mint_txs(&self) -> &[Brc20MintTx] {
-        &self.mints
-    }
-
-    pub fn get_transfer_txs(&self) -> &[Brc20TransferTx] {
-        &self.transfers
     }
 
     pub fn get_ticker(&self) -> String {
@@ -168,47 +177,5 @@ impl Brc20Ticker {
 
     pub fn get_max_supply(&self) -> f64 {
         self.max_supply
-    }
-
-    pub fn get_deploy_tx(&self) -> &Brc20DeployTx {
-        &self.deploy_tx
-    }
-
-    // pub fn get_all_holders_with_balances(&self) -> Vec<(&Address, f64)> {
-    //   self
-    //     .balances
-    //     .iter()
-    //     .map(|(address, balance)| (address, balance.get_overall_balance()))
-    //     .collect()
-    // }
-
-    pub fn display_brc20_ticker(&self) {
-        println!("Deploy Transaction:\n{}", self.deploy_tx);
-
-        println!("Mints:");
-        for mint in &self.mints {
-            println!("{}", mint);
-        }
-
-        println!("Transfers:");
-        for transfer in &self.transfers {
-            println!("{}", transfer);
-        }
-
-        println!("Total Minted: {}", self.total_minted);
-
-        println!("Balances:");
-        for (address, balance) in &self.balances {
-            println!("Address: {}", address);
-            println!("Overall Balance: {}", balance.get_overall_balance());
-
-            println!("Active Transfer Inscriptions:");
-            for (outpoint, transfer) in balance.get_active_transfer_inscriptions() {
-                println!("OutPoint: {:?}", outpoint);
-                println!("{}", transfer);
-            }
-
-            println!("=========================");
-        }
     }
 }
