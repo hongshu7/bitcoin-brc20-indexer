@@ -5,17 +5,17 @@ use std::{collections::HashMap, fmt, fs::File, io::Write};
 
 use super::Brc20Inscription;
 
-/// Brc20Tx represents a transaction containing a BRC20 inscription
-/// the owner is the address that owns the BRC20 inscribed satoshi
-/// which is represented by the first satoshi of vout[0]
+/// Brc20Tx represents a transaction that includes a BRC20 inscription.
+/// The owner is the address that owns the BRC20 inscribed satoshi,
+/// which is represented by the first satoshi of vout[0].
 #[derive(Debug, Clone, Serialize)]
 pub struct Brc20Tx {
-    tx_id: Txid,
-    vout: u32,
-    blocktime: u64,
-    blockheight: u32,
-    owner: Address,
-    inputs: Vec<GetRawTransactionResultVin>,
+    tx_id: Txid,                             // The unique identifier of the transaction
+    vout: u32,                               // The index of the specific output in the transaction
+    blocktime: u64,                          // The blocktime at which the transaction was confirmed
+    blockheight: u32,                        // The block height
+    owner: Address,                          // The address that owns the BRC20 inscribed satoshi
+    inputs: Vec<GetRawTransactionResultVin>, // The inputs of the transaction
 }
 
 impl Brc20Tx {
@@ -60,18 +60,6 @@ impl Brc20Tx {
     pub fn get_owner(&self) -> &Address {
         &self.owner
     }
-
-    pub fn get_blocktime(&self) -> u64 {
-        self.blocktime
-    }
-
-    pub fn get_blockheight(&self) -> u32 {
-        self.blockheight
-    }
-
-    pub fn get_inputs(&self) -> &Vec<GetRawTransactionResultVin> {
-        &self.inputs
-    }
 }
 
 impl fmt::Display for Brc20Tx {
@@ -85,11 +73,13 @@ impl fmt::Display for Brc20Tx {
     }
 }
 
+// InvalidBrc20Tx represents an invalid BRC20 transaction,
+// storing the id of the transaction, the faulty inscription and the reason why it's invalid.
 #[derive(Debug, Clone, Serialize)]
 pub struct InvalidBrc20Tx {
-    pub tx_id: Txid,
-    pub inscription: Brc20Inscription,
-    pub reason: String,
+    tx_id: Txid,                   // The unique identifier of the invalid transaction
+    inscription: Brc20Inscription, // The faulty inscription of the transaction
+    reason: String,                // The reason why the transaction is invalid
 }
 
 impl InvalidBrc20Tx {
@@ -123,6 +113,8 @@ impl InvalidBrc20TxMap {
         }
     }
 
+    // writes the invalid transactions map to a file at the provided path.
+    // It converts the map to JSON before writing.
     pub fn dump_to_file(&self, path: &str) -> std::io::Result<()> {
         let mut file = File::create(path)?;
 
@@ -135,6 +127,8 @@ impl InvalidBrc20TxMap {
         Ok(())
     }
 
+    // adds an invalid transaction to the map.
+    // uses the transaction id as the key to store the invalid transaction.
     pub fn add_invalid_tx(&mut self, invalid_tx: InvalidBrc20Tx) {
         let tx_id = invalid_tx.tx_id;
         self.map.insert(tx_id, invalid_tx);
