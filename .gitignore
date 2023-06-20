@@ -1,4 +1,5 @@
 /target
 /tickers
+/invalid_txs
 
 .env
