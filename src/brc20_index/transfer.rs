@@ -17,7 +17,7 @@ pub struct Brc20Transfer {
     pub amt: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Brc20TransferTx {
     inscription_tx: Brc20Tx,
     transfer_tx: Option<GetRawTransactionResult>,

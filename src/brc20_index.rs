@@ -346,6 +346,11 @@ pub fn index_brc20(
             break;
         }
     }
+
+    if let Err(e) = write_tickers_to_file(&brc20_index.tickers, "brc20_indexer_output.json") {
+        eprintln!("Failed to write to file: {}", e);
+    }
+
     Ok(())
 }
 
@@ -455,4 +460,22 @@ pub fn get_owner_of_vout(
     })?;
 
     Ok(this_address)
+}
+
+use std::fs::File;
+use std::io::Write;
+
+pub fn write_tickers_to_file(
+    tickers: &HashMap<String, Brc20Ticker>,
+    filename: &str,
+) -> std::io::Result<()> {
+    let file = File::create(filename)?;
+
+    for ticker in tickers.values() {
+        let serialized_ticker = serde_json::to_writer_pretty(file, tickers)?;
+        // Serialize ticker to a JSON string.
+        writeln!(file, "{:#?}", serialized_ticker)?; // Write the string to the file.
+    }
+
+    Ok(())
 }

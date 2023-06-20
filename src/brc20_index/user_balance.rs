@@ -1,10 +1,11 @@
 use std::{collections::HashMap, fmt};
 
-use bitcoin::{Address, OutPoint};
+use bitcoin::OutPoint;
+use serde::Serialize;
 
 use super::{mint::Brc20MintTx, transfer::Brc20TransferTx};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct UserBalance {
     active_transfer_inscriptions: HashMap<OutPoint, Brc20TransferTx>,
     transfer_sends: Vec<Brc20TransferTx>,

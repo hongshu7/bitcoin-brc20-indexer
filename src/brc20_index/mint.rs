@@ -1,5 +1,7 @@
 use std::{collections::HashMap, fmt};
 
+use serde::Serialize;
+
 use super::{
     brc20_ticker::Brc20Ticker,
     brc20_tx::{Brc20Tx, InvalidBrc20Tx, InvalidBrc20TxMap},
@@ -71,7 +73,7 @@ impl Brc20MintTx {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Brc20MintTx {
     brc20_tx: Brc20Tx,
     mint: Brc20Inscription,

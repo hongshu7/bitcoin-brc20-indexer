@@ -3,13 +3,14 @@ use std::{collections::HashMap, fmt};
 use bitcoin::{Address, OutPoint, Txid};
 use bitcoincore_rpc::bitcoincore_rpc_json::{GetRawTransactionResult, GetRawTransactionResultVin};
 use log::error;
+use serde::{Deserialize, Serialize};
 
 use super::Brc20Inscription;
 
 /// Brc20Tx represents a transaction containing a BRC20 inscription
 /// the owner is the address that owns the BRC20 inscribed satoshi
 /// which is represented by the first satoshi of vout[0]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Brc20Tx {
     tx_id: Txid,
     vout: u32,
