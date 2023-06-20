@@ -1,0 +1,107 @@
+version: 2.1
+
+orbs:
+  docker: circleci/docker@1.2.1
+  gcp-gke: circleci/gcp-gke@2.1.0
+  gcp-cli: circleci/gcp-cli@3.1.0
+  gcp-gcr: circleci/gcp-gcr@0.15.0
+
+jobs:
+  deploy:
+    description: Deploy application to Google Kubernetes Engine
+    machine: true
+    parameters:
+      cluster:
+        description: |
+          Name of gke cluster
+        type: string
+      container:
+        description: |
+          Name of docker container with organization
+        type: string
+      deployment:
+        description: |
+          Name of k8 deployment
+        type: string
+      image:
+        description: |
+          Name of docker image with organization
+        type: string
+      tag:
+        description: |
+          Docker image tag
+        type: string
+      namespace:
+        description: |
+          K8 namespace
+        type: string
+    steps:
+      - gcp-cli/install:
+          components: kubectl --quiet
+      - run:
+          name: Setup gcloud credentials
+          command: |
+            echo $GCLOUD_SERVICE_KEY | gcloud auth activate-service-account --key-file=-
+            gcloud --quiet config set project ${GOOGLE_PROJECT_ID}
+            gcloud --quiet config set compute/zone ${GOOGLE_COMPUTE_ZONE}
+            gcloud container clusters get-credentials << parameters.cluster >>
+      - gcp-gke/rollout-image:
+          container: << parameters.container >>
+          deployment: << parameters.deployment >>
+          image: << parameters.image >>
+          tag: << parameters.tag >>
+          namespace: << parameters.namespace >>
+
+  test:
+    description: Run integration tests after deployment is finished
+    docker:
+      - image: circleci/golang:latest
+    parameters:
+      environment:
+        description: |
+          The environment to test
+        type: string
+    steps:
+      - checkout
+      - run: make test-<< parameters.environment >>
+
+workflows:
+  docker-build-push-deploy-dev:
+    jobs:
+      - gcp-gcr/build-and-push-image:
+          image: omnisat-indexer-rs
+          tag: 0.0.2
+          registry-url: gcr.io
+          context: omnisat-indexer-rs-dev
+          filters:
+            branches:
+              only:
+                - dev
+      - deploy:
+          cluster: pw-dev
+          container: omnisat-indexer-rs
+          deployment: omnisat-indexer
+          image: gcr.io/pineappleworkshop/omnisat-indexer-rs
+          tag: 0.0.2
+          namespace: omnisat
+          filters:
+            branches:
+              only:
+                - dev
+          requires:
+            - gcp-gcr/build-and-push-image
+
+  docker-build-push-deploy-stage:
+    jobs:
+      - deploy:
+          cluster: pw-prod
+          container: omnisat-indexer-rs
+          deployment: omnisat-indexer-rs
+          image: gcr.io/pineappleworkshop/omnisat-indexer-rs
+          tag: 0.0.2
+          namespace: omnisat
+          context: omnisat-indexer-rs-prod
+          filters:
+            branches:
+              only:
+                - prod

@@ -6,7 +6,6 @@ use bitcoin::{Address, Network, OutPoint};
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use bitcoincore_rpc::{self, Client, RpcApi};
 use log::{error, info};
-use mongodb::bson::{doc, Document};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::{
@@ -34,24 +33,6 @@ pub struct Brc20Inscription {
     pub max: Option<String>,
     pub lim: Option<String>,
     pub dec: Option<String>,
-}
-
-trait ToDocument {
-    fn to_document(&self) -> Document;
-}
-
-impl ToDocument for Brc20Inscription {
-    fn to_document(&self) -> Document {
-        doc! {
-            "p": &self.p,
-            "op": &self.op,
-            "tick": &self.tick,
-            "amt": &self.amt,
-            "max": &self.max,
-            "lim": &self.lim,
-            "dec": &self.dec,
-        }
-    }
 }
 
 //implement Display for Brc20Inscription
@@ -203,6 +184,21 @@ impl Brc20Index {
     }
 }
 
+/// Function to start indexing the BRC-20 transactions from a given block height.
+/// This function is the main driver of the BRC-20 indexer.
+/// It iterates over all blocks from the start_block_height to the end of the chain,
+/// processes all transactions in those blocks, and updates the `Brc20Index`.
+///
+/// # Arguments
+///
+/// * `rpc`: A reference to a Bitcoin RPC client that is used to fetch block and transaction data.
+/// * `start_block_height`: The height of the block from where the indexing process should start.
+///
+/// # Returns
+///
+/// * A `Result` which is:
+///     - `Ok` if the indexing process was successful, or
+///     - `Err` if there was an error during the indexing process.
 pub fn index_brc20(
     rpc: &Client,
     start_block_height: u64,
@@ -211,9 +207,12 @@ pub fn index_brc20(
     let mut brc20_index = Brc20Index::new();
 
     let mut current_block_height = start_block_height;
+    // Start of a loop that runs indefinitely until break is called.
     loop {
+        // get the hash of the block at the current block height.
         match rpc.get_block_hash(current_block_height) {
             Ok(current_block_hash) => {
+                // get the block with the hash.
                 match rpc.get_block(&current_block_hash) {
                     Ok(block) => {
                         let length = block.txdata.len();
@@ -222,6 +221,7 @@ pub fn index_brc20(
                             current_block_hash, length, current_block_height
                         );
 
+                        // Loop over each transaction in the block.
                         for transaction in block.txdata {
                             let txid = transaction.txid();
                             // Get Raw Transaction
@@ -240,7 +240,10 @@ pub fn index_brc20(
                                     // get owner address, inscription is first satoshi of first output
                                     let owner = get_owner_of_vout_0(&raw_tx)?;
 
-                                    // create brc20_tx
+                                    // Create a new Brc20Tx (BRC-20 Transaction) instance. This structure represents a BRC-20 transaction
+                                    // which is created for every BRC-20 operation. The purpose of creating this
+                                    // instance is to hold the details of a BRC-20 transaction such as the raw transaction inputs, the owner
+                                    // of the transaction, blocktime and the block height at which the transaction was mined.
                                     let brc20_tx =
                                         Brc20Tx::new(&raw_tx, owner, current_block_height as u32)?;
 
@@ -315,14 +318,19 @@ pub fn index_brc20(
     Ok(())
 }
 
+/// Function to handle a deploy operation.
+/// This function validates the deploy script and adds the deploy information to the `Brc20Index`.
+/// If the deploy script is invalid, it adds the transaction to the `invalid_tx_map`.
 fn handle_deploy_operation(
     inscription: Brc20Inscription,
     brc20_tx: Brc20Tx,
     brc20_index: &mut Brc20Index,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Validate the deploy script.
     let validated_deploy_tx = Brc20DeployTx::new(brc20_tx, inscription)
         .validate_deploy_script(&mut brc20_index.invalid_tx_map, &brc20_index.tickers);
 
+    // Check if the deploy script is valid.
     if validated_deploy_tx.is_valid() {
         println!("=========================");
         println!("Deploy: {:?}", validated_deploy_tx.get_deploy_script());
@@ -335,18 +343,21 @@ fn handle_deploy_operation(
     Ok(())
 }
 
+/// Function to handle a mint operation.
+/// This function validates the mint script and adds the mint information to the `Brc20Index`.
+/// If the mint script is invalid, it adds the transaction to the `invalid_tx_map`.
 fn handle_mint_operation(
     inscription: Brc20Inscription,
     brc20_tx: &Brc20Tx,
     brc20_index: &mut Brc20Index,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Validate the mint operation.
     let validated_mint_tx = Brc20MintTx::new(&brc20_tx, inscription).validate_mint(
         &brc20_tx,
         &mut brc20_index.tickers,
         &mut brc20_index.invalid_tx_map,
     );
 
-    // Check if the mint operation is valid.
     if validated_mint_tx.is_valid() {
         println!("=========================");
         println!("Mint: {:?}", validated_mint_tx.get_mint());
@@ -359,20 +370,34 @@ fn handle_mint_operation(
     Ok(())
 }
 
+// Handle the transfer operation.
+// This function is called when a transfer operation is found in the inscription.
+// It validates the transfer operation and updates the hashmap with the transfer information.
+// If the transfer operation is invalid, it is added to the invalid_tx_map.
 fn handle_transfer_operation(
     inscription: Brc20Inscription,
     brc20_tx: Brc20Tx,
     brc20_index: &mut Brc20Index,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Instantiate a new `Brc20TransferTx` struct.
+    // This struct contains the transfer script and the brc20_tx.
+    // The transfer script is used to validate the transfer operation.
+    // The brc20_tx is used to get the owner address.
+    // The owner address is used to update the `active_transfer_inscription` in the `Brc20Index`.
+    // The `active_transfer_inscription` is used to validate the transfer amount.
+    // The `active_transfer_inscription` is updated when the transfer operation is valid.
     let mut brc20_transfer_tx = Brc20TransferTx::new(brc20_tx, inscription);
 
+    // Validate the transfer operation.
     brc20_transfer_tx.handle_inscribe_transfer_amount(brc20_index);
 
+    // Update the `active_transfer_inscription` in the `Brc20Index`.
     brc20_index.update_active_transfer_inscription(
         brc20_transfer_tx.get_inscription_outpoint(),
         brc20_transfer_tx.get_transfer_script().tick.clone(),
     );
 
+    // just a console print
     if brc20_transfer_tx.is_valid() {
         println!("=========================");
         println!("Transfer: {:?}", brc20_transfer_tx.get_transfer_script());

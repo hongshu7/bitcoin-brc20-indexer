@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: omnisat-indexer-rs
+  namespace: omnisat
+spec:
+  selector:
+    matchLabels:
+      app: omnisat-indexer-rs
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: omnisat-indexer-rs
+    spec:
+      containers:
+        - name: omnisat-indexer-rs
+          image: gcr.io/pineappleworkshop/omnisat-indexer-rs:0.0.2
+          env:
+            - name: ENV
+              value: 'dev'
+            - name: RPC_USER
+              valueFrom: 
+                secretKeyRef: 
+                  name: omnisat-indexer-rs-secret
+                  key: btc_rpc_user
+            - name: RPC_PASSWORD
+              valueFrom: 
+                secretKeyRef: 
+                  name: omnisat-indexer-rs-secret
+                  key: btc_rpc_password
+            - name: RPC_URL
+              valueFrom: 
+                secretKeyRef: 
+                  name: omnisat-indexer-rs-secret
+                  key: btc_rpc_host
