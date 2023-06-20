@@ -1,11 +1,9 @@
-use std::collections::HashMap;
-
-use bitcoin::{Address, OutPoint};
-use serde::Serialize;
-
 use super::{
     deploy::Brc20DeployTx, mint::Brc20MintTx, transfer::Brc20TransferTx, user_balance::UserBalance,
 };
+use bitcoin::{Address, OutPoint};
+use serde::Serialize;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Brc20Ticker {

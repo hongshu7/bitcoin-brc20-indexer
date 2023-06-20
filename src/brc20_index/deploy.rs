@@ -1,9 +1,7 @@
-use std::{collections::HashMap, fmt};
-
+use super::brc20_tx::{Brc20Tx, InvalidBrc20Tx, InvalidBrc20TxMap};
 use super::{brc20_ticker::Brc20Ticker, utils::convert_to_float, Brc20Inscription};
 use serde::Serialize;
-
-use super::brc20_tx::{Brc20Tx, InvalidBrc20Tx, InvalidBrc20TxMap};
+use std::{collections::HashMap, fmt};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Brc20DeployTx {

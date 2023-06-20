@@ -1,3 +1,7 @@
+use self::{
+    brc20_ticker::Brc20Ticker, brc20_tx::Brc20Tx, brc20_tx::InvalidBrc20TxMap,
+    deploy::Brc20DeployTx, mint::Brc20MintTx, transfer::Brc20TransferTx,
+};
 use bitcoin::{Address, Network, OutPoint};
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use bitcoincore_rpc::{self, Client, RpcApi};
@@ -12,13 +16,6 @@ use std::{
     thread::sleep,
     time::Duration,
 };
-
-use self::brc20_ticker::Brc20Ticker;
-use self::brc20_tx::Brc20Tx;
-use self::brc20_tx::InvalidBrc20TxMap;
-use self::deploy::Brc20DeployTx;
-use self::mint::Brc20MintTx;
-use self::transfer::Brc20TransferTx;
 
 mod brc20_ticker;
 mod brc20_tx;
@@ -76,6 +73,10 @@ impl Brc20Index {
             invalid_tx_map: InvalidBrc20TxMap::new(),
             active_transfer_inscriptions: HashMap::new(),
         }
+    }
+
+    pub fn dump_invalid_txs_to_file(&self, path: &str) -> std::io::Result<()> {
+        self.invalid_tx_map.dump_to_file(path)
     }
 
     pub fn process_active_transfer(
@@ -233,87 +234,21 @@ pub fn index_brc20(
                                         Brc20Tx::new(&raw_tx, owner, current_block_height as u32)?;
 
                                     match &inscription.op[..] {
-                                        "deploy" => {
-                                            let validated_deploy_tx =
-                                                Brc20DeployTx::new(brc20_tx, inscription)
-                                                    .validate_deploy_script(
-                                                        &mut brc20_index.invalid_tx_map,
-                                                        &brc20_index.tickers,
-                                                    );
-
-                                            if validated_deploy_tx.is_valid() {
-                                                println!("=========================");
-                                                println!(
-                                                    "Deploy: {:?}",
-                                                    validated_deploy_tx.get_deploy_script()
-                                                );
-                                                println!("=========================");
-
-                                                // Instantiate a new `Brc20Ticker` struct and update the hashmap with the deploy information.
-                                                let ticker = Brc20Ticker::new(validated_deploy_tx);
-                                                brc20_index
-                                                    .tickers
-                                                    .insert(ticker.get_ticker(), ticker);
-                                            }
-                                        }
-                                        "mint" => {
-                                            // Validate and instantiate a new `Brc20MintTx` struct.
-                                            let validated_mint_tx =
-                                                Brc20MintTx::new(&brc20_tx, inscription)
-                                                    .validate_mint(
-                                                        &brc20_tx,
-                                                        &mut brc20_index.tickers,
-                                                        &mut brc20_index.invalid_tx_map,
-                                                    );
-
-                                            // Check if the mint operation is valid.
-                                            if validated_mint_tx.is_valid() {
-                                                println!("=========================");
-                                                println!(
-                                                    "Mint: {:?}",
-                                                    validated_mint_tx.get_mint()
-                                                );
-                                                println!(
-                                                    "Owner Address: {:?}",
-                                                    validated_mint_tx.get_brc20_tx().get_owner()
-                                                );
-                                                println!("=========================");
-                                            }
-                                        }
-                                        "transfer" => {
-                                            // Instantiate a new `BrcTransferTx` struct.
-                                            let mut brc20_transfer_tx =
-                                                Brc20TransferTx::new(brc20_tx, inscription);
-
-                                            // Call handle_inscribe_transfer_amount
-                                            brc20_transfer_tx
-                                                .handle_inscribe_transfer_amount(&mut brc20_index);
-
-                                            // add to active transfer inscriptions for index
-                                            brc20_index.update_active_transfer_inscription(
-                                                brc20_transfer_tx.get_inscription_outpoint(),
-                                                brc20_transfer_tx
-                                                    .get_transfer_script()
-                                                    .tick
-                                                    .clone(),
-                                            );
-
-                                            // Check if the transfer is valid.
-                                            if brc20_transfer_tx.is_valid() {
-                                                println!("=========================");
-                                                println!(
-                                                    "Transfer: {:?}",
-                                                    brc20_transfer_tx.get_transfer_script()
-                                                );
-                                                println!(
-                                                    "Owner Address: {:?}",
-                                                    brc20_transfer_tx
-                                                        .get_inscription_brc20_tx()
-                                                        .get_owner()
-                                                );
-                                                println!("=========================");
-                                            }
-                                        }
+                                        "deploy" => handle_deploy_operation(
+                                            inscription,
+                                            brc20_tx,
+                                            &mut brc20_index,
+                                        )?,
+                                        "mint" => handle_mint_operation(
+                                            inscription,
+                                            &brc20_tx,
+                                            &mut brc20_index,
+                                        )?,
+                                        "transfer" => handle_transfer_operation(
+                                            inscription,
+                                            brc20_tx,
+                                            &mut brc20_index,
+                                        )?,
                                         _ => {
                                             // Unexpected operation
                                             error!("Unexpected operation: {}", inscription.op);
@@ -355,6 +290,85 @@ pub fn index_brc20(
         Err(e) => println!("An error occurred while writing tickers to files: {:?}", e),
     }
 
+    let result = brc20_index.dump_invalid_txs_to_file("invalid_txs.json");
+    match result {
+        Ok(()) => println!("Successfully dumped invalid transactions to file."),
+        Err(e) => println!(
+            "An error occurred while dumping invalid transactions to file: {:?}",
+            e
+        ),
+    }
+
+    Ok(())
+}
+
+fn handle_deploy_operation(
+    inscription: Brc20Inscription,
+    brc20_tx: Brc20Tx,
+    brc20_index: &mut Brc20Index,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let validated_deploy_tx = Brc20DeployTx::new(brc20_tx, inscription)
+        .validate_deploy_script(&mut brc20_index.invalid_tx_map, &brc20_index.tickers);
+
+    if validated_deploy_tx.is_valid() {
+        println!("=========================");
+        println!("Deploy: {:?}", validated_deploy_tx.get_deploy_script());
+        println!("=========================");
+
+        // Instantiate a new `Brc20Ticker` struct and update the hashmap with the deploy information.
+        let ticker = Brc20Ticker::new(validated_deploy_tx);
+        brc20_index.tickers.insert(ticker.get_ticker(), ticker);
+    }
+    Ok(())
+}
+
+fn handle_mint_operation(
+    inscription: Brc20Inscription,
+    brc20_tx: &Brc20Tx,
+    brc20_index: &mut Brc20Index,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let validated_mint_tx = Brc20MintTx::new(&brc20_tx, inscription).validate_mint(
+        &brc20_tx,
+        &mut brc20_index.tickers,
+        &mut brc20_index.invalid_tx_map,
+    );
+
+    // Check if the mint operation is valid.
+    if validated_mint_tx.is_valid() {
+        println!("=========================");
+        println!("Mint: {:?}", validated_mint_tx.get_mint());
+        println!(
+            "Owner Address: {:?}",
+            validated_mint_tx.get_brc20_tx().get_owner()
+        );
+        println!("=========================");
+    }
+    Ok(())
+}
+
+fn handle_transfer_operation(
+    inscription: Brc20Inscription,
+    brc20_tx: Brc20Tx,
+    brc20_index: &mut Brc20Index,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut brc20_transfer_tx = Brc20TransferTx::new(brc20_tx, inscription);
+
+    brc20_transfer_tx.handle_inscribe_transfer_amount(brc20_index);
+
+    brc20_index.update_active_transfer_inscription(
+        brc20_transfer_tx.get_inscription_outpoint(),
+        brc20_transfer_tx.get_transfer_script().tick.clone(),
+    );
+
+    if brc20_transfer_tx.is_valid() {
+        println!("=========================");
+        println!("Transfer: {:?}", brc20_transfer_tx.get_transfer_script());
+        println!(
+            "Owner Address: {:?}",
+            brc20_transfer_tx.get_inscription_brc20_tx().get_owner()
+        );
+        println!("=========================");
+    }
     Ok(())
 }
 
@@ -452,7 +466,7 @@ pub fn get_owner_of_vout(
         ));
     }
 
-    // Get the controlling address of the first output
+    // Get the controlling address of vout[vout_index]
     let script_pubkey = &raw_tx_info.vout[vout_index].script_pub_key;
     let script = match script_pubkey.script() {
         Ok(script) => script,

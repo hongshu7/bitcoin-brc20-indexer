@@ -1,14 +1,11 @@
-use std::{collections::HashMap, fmt};
-
-use serde::Serialize;
-
 use super::{
     brc20_ticker::Brc20Ticker,
     brc20_tx::{Brc20Tx, InvalidBrc20Tx, InvalidBrc20TxMap},
-    user_balance::UserBalance,
     utils::convert_to_float,
     Brc20Inscription,
 };
+use serde::Serialize;
+use std::{collections::HashMap, fmt};
 
 impl Brc20MintTx {
     pub fn validate_mint<'a>(

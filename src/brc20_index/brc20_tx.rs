@@ -1,7 +1,7 @@
 use bitcoin::{Address, OutPoint, Txid};
 use bitcoincore_rpc::bitcoincore_rpc_json::{GetRawTransactionResult, GetRawTransactionResultVin};
 use serde::Serialize;
-use std::{collections::HashMap, fmt};
+use std::{collections::HashMap, fmt, fs::File, io::Write};
 
 /// Brc20Tx represents a transaction containing a BRC20 inscription
 /// the owner is the address that owns the BRC20 inscribed satoshi
@@ -83,13 +83,13 @@ impl fmt::Display for Brc20Tx {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct InvalidBrc20Tx {
     pub brc20_tx: Brc20Tx,
     pub reason: String,
 }
 
-impl<'a> InvalidBrc20Tx {
+impl InvalidBrc20Tx {
     pub fn new(brc20_tx: Brc20Tx, reason: String) -> Self {
         InvalidBrc20Tx { brc20_tx, reason }
     }
@@ -103,16 +103,28 @@ impl fmt::Display for InvalidBrc20Tx {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize)]
 pub struct InvalidBrc20TxMap {
     map: HashMap<Txid, InvalidBrc20Tx>,
 }
 
-impl<'a> InvalidBrc20TxMap {
+impl InvalidBrc20TxMap {
     pub fn new() -> Self {
         InvalidBrc20TxMap {
             map: HashMap::new(),
         }
+    }
+
+    pub fn dump_to_file(&self, path: &str) -> std::io::Result<()> {
+        let mut file = File::create(path)?;
+
+        // Convert the invalid transactions map to JSON
+        let json = serde_json::to_string_pretty(&self.map)?;
+
+        // Write to the file
+        file.write_all(json.as_bytes())?;
+
+        Ok(())
     }
 
     pub fn add_invalid_tx(&mut self, invalid_tx: InvalidBrc20Tx) {

@@ -1,9 +1,7 @@
-use std::{collections::HashMap, fmt};
-
+use super::{mint::Brc20MintTx, transfer::Brc20TransferTx};
 use bitcoin::OutPoint;
 use serde::Serialize;
-
-use super::{mint::Brc20MintTx, transfer::Brc20TransferTx};
+use std::{collections::HashMap, fmt};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UserBalance {

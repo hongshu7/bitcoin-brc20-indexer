@@ -1,13 +1,11 @@
-use std::fmt;
-
-use bitcoin::{Address, OutPoint};
-use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
-use serde::{Deserialize, Serialize};
-
 use super::{
     brc20_tx::{Brc20Tx, InvalidBrc20Tx},
     Brc20Index, Brc20Inscription,
 };
+use bitcoin::{Address, OutPoint};
+use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
+use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Brc20Transfer {
