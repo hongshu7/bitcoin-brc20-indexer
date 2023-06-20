@@ -60,6 +60,8 @@ impl Brc20MintTx {
             let invalid_tx = InvalidBrc20Tx::new(brc20_mint_tx.get_brc20_tx().clone(), reason);
             invalid_tx_map.add_invalid_tx(invalid_tx);
         } else {
+            // Set is_valid to true when the transaction is valid
+            brc20_mint_tx.is_valid = true;
             let ticker = ticker_map.get_mut(&brc20_mint_tx.mint.tick).unwrap();
             ticker.add_mint(brc20_mint_tx.clone());
         }

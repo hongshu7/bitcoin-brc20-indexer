@@ -1,24 +1,24 @@
-extern crate serde_json;
-
 use bitcoin::{Address, Network, OutPoint};
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use bitcoincore_rpc::{self, Client, RpcApi};
 use log::{error, info};
 use mongodb::bson::{doc, Document};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fs::{DirBuilder, File};
-use std::io::Write;
-use std::thread::sleep;
-use std::time::Duration;
-
-use crate::brc20_index::brc20_tx::Brc20Tx;
-use crate::brc20_index::deploy::Brc20DeployTx;
-use crate::brc20_index::mint::Brc20MintTx;
-use crate::brc20_index::transfer::Brc20TransferTx;
+use serde_json;
+use std::{
+    collections::HashMap,
+    fs::{DirBuilder, File},
+    io::Write,
+    thread::sleep,
+    time::Duration,
+};
 
 use self::brc20_ticker::Brc20Ticker;
+use self::brc20_tx::Brc20Tx;
 use self::brc20_tx::InvalidBrc20TxMap;
+use self::deploy::Brc20DeployTx;
+use self::mint::Brc20MintTx;
+use self::transfer::Brc20TransferTx;
 
 mod brc20_ticker;
 mod brc20_tx;
@@ -343,7 +343,7 @@ pub fn index_brc20(
         }
 
         // stop after reaching a certain block height
-        if current_block_height > 795125 {
+        if current_block_height > 795150 {
             break;
         }
     }
