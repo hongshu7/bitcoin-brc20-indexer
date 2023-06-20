@@ -7,6 +7,8 @@ use log::{error, info};
 use mongodb::bson::{doc, Document};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs::{DirBuilder, File};
+use std::io::Write;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -202,12 +204,11 @@ pub fn index_brc20(
             Ok(current_block_hash) => {
                 match rpc.get_block(&current_block_hash) {
                     Ok(block) => {
-                        info!(
-                            "Fetched block: {:?}, height: {:?}",
-                            current_block_hash, current_block_height
-                        );
                         let length = block.txdata.len();
-                        info!("Number of transactions: {:?}", length);
+                        info!(
+                            "Fetched block: {:?}, Transactions: {:?}, Block: {:?}",
+                            current_block_hash, length, current_block_height
+                        );
 
                         for transaction in block.txdata {
                             let txid = transaction.txid();
@@ -222,7 +223,7 @@ pub fn index_brc20(
                                     // print pretty json
                                     // let pretty_json =
                                     //     serde_json::to_string(&inscription).unwrap_or_default();
-                                    // info!("Brc-20 data: {}", pretty_json);
+                                    // info!("Raw Brc-20 data: {}", pretty_json);
 
                                     // get owner address, inscription is first satoshi of first output
                                     let owner = get_owner_of_vout_0(&raw_tx)?;
@@ -342,13 +343,16 @@ pub fn index_brc20(
         }
 
         // stop after reaching a certain block height
-        if current_block_height > 800000 {
+        if current_block_height > 795125 {
             break;
         }
     }
 
-    if let Err(e) = write_tickers_to_file(&brc20_index.tickers, "brc20_indexer_output.json") {
-        eprintln!("Failed to write to file: {}", e);
+    let result = write_tickers_to_file(&brc20_index.tickers, "tickers");
+
+    match result {
+        Ok(()) => println!("Successfully wrote tickers to files."),
+        Err(e) => println!("An error occurred while writing tickers to files: {:?}", e),
     }
 
     Ok(())
@@ -462,18 +466,57 @@ pub fn get_owner_of_vout(
     Ok(this_address)
 }
 
-use std::fs::File;
-use std::io::Write;
+//this is for logging to file
+#[derive(Serialize)]
+struct BalanceInfo {
+    overall_balance: f64,
+    available_balance: f64,
+    transferable_balance: f64,
+}
+
+#[derive(Serialize)]
+struct TickerWithBalances {
+    ticker: Brc20Ticker,
+    balances: HashMap<String, BalanceInfo>,
+}
 
 pub fn write_tickers_to_file(
     tickers: &HashMap<String, Brc20Ticker>,
-    filename: &str,
+    directory: &str,
 ) -> std::io::Result<()> {
-    let mut file = File::create(filename)?;
+    let mut dir_builder = DirBuilder::new();
+    dir_builder.recursive(true); // This will create parent directories if they don't exist
+    dir_builder.create(directory)?; // Create the directory if it doesn't exist
 
-    for ticker in tickers.values() {
-        let serialized_ticker = serde_json::to_string_pretty(ticker)?;
-        writeln!(file, "{}", serialized_ticker)?;
+    for (ticker_name, ticker) in tickers {
+        let filename = format!("{}/{}.json", directory, ticker_name); // create a unique filename
+        let mut file = File::create(&filename)?; // create a new file for each ticker
+
+        // map each balance to a BalanceInfo
+        let balances: HashMap<String, BalanceInfo> = ticker
+            .get_balances()
+            .iter()
+            .map(|(address, user_balance)| {
+                (
+                    address.to_string(),
+                    BalanceInfo {
+                        overall_balance: user_balance.get_overall_balance(),
+                        available_balance: user_balance.get_available_balance(),
+                        transferable_balance: user_balance.get_transferable_balance(),
+                    },
+                )
+            })
+            .collect();
+
+        // construct a TickerWithBalances
+        let ticker_with_balances = TickerWithBalances {
+            ticker: ticker.clone(),
+            balances,
+        };
+
+        // serialize and write the TickerWithBalances
+        let serialized = serde_json::to_string_pretty(&ticker_with_balances)?;
+        writeln!(file, "{}", serialized)?;
     }
 
     Ok(())

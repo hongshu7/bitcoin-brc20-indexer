@@ -69,7 +69,7 @@ impl Brc20Ticker {
 
         if let Some(user_balance) = self.balances.get(&sender) {
             log::info!(
-              "Updated transfer sends for user {}: overall balance = {}, available balance = {}, transferable balance = {}",
+              "Transfer send from user {}: overall balance = {}, available balance = {}, transferable balance = {}",
               sender,
               user_balance.get_overall_balance(),
               user_balance.get_available_balance(),
@@ -89,7 +89,7 @@ impl Brc20Ticker {
 
         if let Some(user_balance) = self.balances.get(&receiver) {
             log::info!(
-              "Updated transfer receives for user {}: overall balance = {}, available balance = {}, transferable balance = {}",
+              "Transfer received for user {}: overall balance = {}, available balance = {}, transferable balance = {}",
               receiver,
               user_balance.get_overall_balance(),
               user_balance.get_available_balance(),
@@ -119,6 +119,11 @@ impl Brc20Ticker {
               user_balance.get_transferable_balance()
           );
         }
+    }
+
+    // get balances
+    pub fn get_balances(&self) -> &HashMap<Address, UserBalance> {
+        &self.balances
     }
 
     pub fn add_user_balance(&mut self, address: Address, balance: UserBalance) {

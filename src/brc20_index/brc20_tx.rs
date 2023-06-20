@@ -55,12 +55,24 @@ impl Brc20Tx {
         }
     }
 
+    pub fn get_txid(&self) -> &Txid {
+        &self.tx_id
+    }
+
     pub fn get_owner(&self) -> &Address {
         &self.owner
     }
 
     pub fn get_blocktime(&self) -> u64 {
         self.blocktime
+    }
+
+    pub fn get_blockheight(&self) -> u32 {
+        self.blockheight
+    }
+
+    pub fn get_inputs(&self) -> &Vec<GetRawTransactionResultVin> {
+        &self.inputs
     }
 }
 

@@ -27,7 +27,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Connected to Bitcoin Core");
 
     // block height to start indexing from
-    let start_block_height = 779832;
+    let start_block_height = 779832; // 779382 is starting block height for BRC20
+
+    // let start_block_height = 795050;
 
     // LFG!
     index_brc20(&rpc, start_block_height)?;
