@@ -1,5 +1,5 @@
 /target
 /tickers
 /invalid_txs
-
+/deployments/k8s/dev-secret.yml
 .env
