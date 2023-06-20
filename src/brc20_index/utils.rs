@@ -1,5 +1,100 @@
-use bitcoin::{Address, Network, OutPoint, TxIn, TxOut};
+use super::{brc20_ticker::Brc20Ticker, Brc20Inscription};
+use bitcoin::{Address, Network, TxIn};
 use bitcoincore_rpc::{bitcoincore_rpc_json::GetRawTransactionResult, Client, RpcApi};
+use log::error;
+use serde::Serialize;
+use std::{
+    collections::HashMap,
+    fs::{DirBuilder, File},
+    io::Write,
+};
+
+pub fn get_witness_data_from_raw_tx(
+    raw_tx_info: &GetRawTransactionResult,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let transaction = raw_tx_info.transaction()?;
+
+    let mut witness_data_strings: Vec<String> = Vec::new();
+
+    // Get the first transaction input
+    if let Some(input) = transaction.input.first() {
+        // Iterate through each witness of the input
+        for witness in &input.witness {
+            let witness_string = String::from_utf8_lossy(witness).into_owned();
+            witness_data_strings.push(witness_string);
+        }
+    }
+
+    Ok(witness_data_strings)
+}
+
+// extracts only inscriptions that read "brc-20", many will be invalid
+pub fn extract_and_process_witness_data(witness_data: String) -> Option<Brc20Inscription> {
+    // Check for the correct MIME type and find its end
+    let mime_end_index = if witness_data.contains("text/plain") {
+        witness_data.find("text/plain").unwrap() + "text/plain".len()
+    } else if witness_data.contains("application/json") {
+        witness_data.find("application/json").unwrap() + "application/json".len()
+    } else {
+        return None;
+    };
+
+    // Start searching for the JSON data only after the MIME type
+    if let Some(json_start) = witness_data[mime_end_index..].find('{') {
+        let json_start = mime_end_index + json_start; // Adjust json_start to be relative to the original string
+        if let Some(json_end) = witness_data[json_start..].rfind('}') {
+            // Extract the JSON string
+            let json_data = &witness_data[json_start..json_start + json_end + 1];
+
+            // Try to parse the JSON data
+            match serde_json::from_str::<Brc20Inscription>(json_data) {
+                Ok(parsed_data) => {
+                    // Only return the parsed data if it contains the expected fields
+                    if parsed_data.p == "brc-20" {
+                        // // Convert the data to JSON string with null values represented as "null"
+                        // let json_string = serde_json::to_string(&parsed_data).unwrap_or_default();
+                        // println!("{}", json_string);
+
+                        return Some(parsed_data);
+                    }
+                }
+                Err(_e) => {
+                    // error!("JSON parsing failed: {:?}", e);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_owner_of_vout(
+    raw_tx_info: &GetRawTransactionResult,
+    vout_index: usize,
+) -> Result<Address, anyhow::Error> {
+    if raw_tx_info.vout.is_empty() {
+        return Err(anyhow::anyhow!("Transaction has no outputs"));
+    }
+
+    if raw_tx_info.vout.len() <= vout_index {
+        return Err(anyhow::anyhow!(
+            "Transaction doesn't have vout at given index"
+        ));
+    }
+
+    // Get the controlling address of vout[vout_index]
+    let script_pubkey = &raw_tx_info.vout[vout_index].script_pub_key;
+    let script = match script_pubkey.script() {
+        Ok(script) => script,
+        Err(e) => return Err(anyhow::anyhow!("Failed to get script: {:?}", e)),
+    };
+    let this_address = Address::from_script(&script, Network::Bitcoin).map_err(|e| {
+        error!("Couldn't derive address from scriptPubKey: {:?}", e);
+        anyhow::anyhow!("Couldn't derive address from scriptPubKey: {:?}", e)
+    })?;
+
+    Ok(this_address)
+}
 
 pub fn convert_to_float(number_string: &str, decimals: u8) -> Result<f64, &'static str> {
     let parts: Vec<&str> = number_string.split('.').collect();
@@ -25,85 +120,6 @@ pub fn convert_to_float(number_string: &str, decimals: u8) -> Result<f64, &'stat
             }
         }
         _ => Err("Malformed inscription"), // More than one decimal point
-    }
-}
-
-// pub(crate) fn handle_transaction(
-//   index: &Index,
-//   outpoint: &OutPoint,
-// ) -> Result<(), Box<dyn std::error::Error>> {
-//   // Get the raw transaction info.
-//   let raw_tx_info = index
-//     .client
-//     .get_raw_transaction_info(&outpoint.txid, None)?;
-
-//   // Display the raw transaction info.
-//   display_raw_transaction_info(&raw_tx_info);
-
-//   // Get the transaction Inputs
-//   let inputs = &raw_tx_info.transaction()?.input;
-
-//   // Get the addresses and values of the inputs.
-//   let input_addresses_values = transaction_inputs_to_addresses_values(index, inputs)?;
-//   for (index, (address, value)) in input_addresses_values.iter().enumerate() {
-//     println!("Input Address {}: {}, Value: {}", index + 1, address, value);
-//   }
-
-//   // display_input_info(&raw_tx_info);
-
-//   println!("=====");
-//   // Get the transaction Outputs
-//   let outputs = &raw_tx_info.transaction()?.output;
-
-//   // Get the addresses and values of the outputs.
-//   let output_addresses_values = transaction_outputs_to_addresses_values(outputs)?;
-//   for (index, (address, value)) in output_addresses_values.iter().enumerate() {
-//     println!(
-//       "Output Address {}: {}, Value: {}",
-//       index + 1,
-//       address,
-//       value
-//     );
-//   }
-
-//   Ok(())
-// }
-
-fn transaction_inputs_to_addresses_values(
-    client: &Client,
-    inputs: &Vec<TxIn>,
-) -> Result<Vec<(Address, u64)>, Box<dyn std::error::Error>> {
-    let mut addresses_values: Vec<(Address, u64)> = vec![];
-
-    for input in inputs {
-        let prev_output = input.previous_output;
-        println!(
-            "Input from transaction: {:?}, index: {:?}",
-            prev_output.txid, prev_output.vout
-        );
-
-        let prev_tx_info = client.get_raw_transaction_info(&prev_output.txid, None)?;
-
-        let prev_tx = prev_tx_info.transaction()?;
-
-        let output = &prev_tx.output[usize::try_from(prev_output.vout).unwrap()];
-        let script_pub_key = &output.script_pubkey;
-
-        let address = Address::from_script(&script_pub_key, Network::Bitcoin).map_err(|_| {
-            println!("Couldn't derive address from scriptPubKey");
-            "Couldn't derive address from scriptPubKey"
-        })?;
-
-        // Add both the address and the value of the output to the list
-        addresses_values.push((address, output.value));
-
-        println!("=====");
-    }
-
-    if addresses_values.is_empty() {
-        Err("Couldn't derive any addresses or values from scriptPubKeys".into())
-    } else {
-        Ok(addresses_values)
     }
 }
 
@@ -136,109 +152,58 @@ pub fn transaction_inputs_to_values(client: &Client, inputs: &[TxIn]) -> anyhow:
     }
 }
 
-// get the address and value of the outpoint
-pub fn outpoint_to_address_value(
-    client: &Client,
-    outpoint: &OutPoint,
-) -> Result<(Address, u64), Box<dyn std::error::Error>> {
-    let prev_tx_info = client.get_raw_transaction_info(&outpoint.txid, None)?;
-
-    let prev_tx = prev_tx_info.transaction()?;
-
-    let output = &prev_tx.output[usize::try_from(outpoint.vout).unwrap()];
-    let script_pub_key = &output.script_pubkey;
-
-    let address = Address::from_script(&script_pub_key, Network::Bitcoin).map_err(|_| {
-        println!("Couldn't derive address from scriptPubKey");
-        "Couldn't derive address from scriptPubKey"
-    })?;
-
-    Ok((address, output.value))
+//this is for logging to file
+#[derive(Serialize)]
+struct BalanceInfo {
+    overall_balance: f64,
+    available_balance: f64,
+    transferable_balance: f64,
 }
 
-fn transaction_outputs_to_addresses_values(
-    outputs: &Vec<TxOut>,
-) -> Result<Vec<(Address, u64)>, Box<dyn std::error::Error>> {
-    let mut addresses_values: Vec<(Address, u64)> = vec![];
-
-    for output in outputs {
-        let script_pub_key = &output.script_pubkey;
-
-        if let Ok(address) = Address::from_script(&script_pub_key, Network::Bitcoin) {
-            // Add both the address and the value of the output to the list
-            addresses_values.push((address, output.value));
-        } else {
-            println!("Couldn't derive address from scriptPubKey");
-        }
-    }
-
-    if addresses_values.is_empty() {
-        Err("Couldn't derive any addresses or values from scriptPubKeys".into())
-    } else {
-        Ok(addresses_values)
-    }
+#[derive(Serialize)]
+struct TickerWithBalances {
+    ticker: Brc20Ticker,
+    balances: HashMap<String, BalanceInfo>,
 }
 
-fn display_raw_transaction_info(raw_transaction_info: &GetRawTransactionResult) {
-    println!("Raw Transaction Information:");
-    println!("----------------");
-    println!("Txid: {:?}", raw_transaction_info.txid);
-    println!("Hash: {:?}", raw_transaction_info.hash);
-    println!("Size: {:?}", raw_transaction_info.size);
-    println!("Vsize: {:?}", raw_transaction_info.vsize);
-    println!("Version: {:?}", raw_transaction_info.version);
-    println!("Locktime: {:?}", raw_transaction_info.locktime);
-    println!("Blockhash: {:?}", raw_transaction_info.blockhash);
-    println!("Confirmations: {:?}", raw_transaction_info.confirmations);
-    println!("Time: {:?}", raw_transaction_info.time);
-    println!("Blocktime: {:?}", raw_transaction_info.blocktime);
-    println!();
-}
+pub fn write_tickers_to_file(
+    tickers: &HashMap<String, Brc20Ticker>,
+    directory: &str,
+) -> std::io::Result<()> {
+    let mut dir_builder = DirBuilder::new();
+    dir_builder.recursive(true); // This will create parent directories if they don't exist
+    dir_builder.create(directory)?; // Create the directory if it doesn't exist
 
-fn display_input_info(raw_transaction_info: &GetRawTransactionResult) {
-    println!("Inputs (Vin):");
-    println!("-------------");
-    for (i, vin) in raw_transaction_info.vin.iter().enumerate() {
-        println!("Vin {}: {:?}", i + 1, vin);
-        if let Some(txid) = &vin.txid {
-            println!("  txid: {:?}", txid);
-        }
-        if let Some(vout) = vin.vout {
-            println!("  vout: {:?}", vout);
-        }
-        if let Some(script_sig) = &vin.script_sig {
-            println!("  script_sig: {:?}", script_sig);
-        }
-        if let Some(txinwitness) = &vin.txinwitness {
-            println!("  txinwitness: {:?}", txinwitness);
-        }
-        if let Some(coinbase) = &vin.coinbase {
-            println!("  coinbase: {:?}", coinbase);
-        }
-        println!("  sequence: {:?}", vin.sequence);
+    for (ticker_name, ticker) in tickers {
+        let filename = format!("{}/{}.json", directory, ticker_name); // create a unique filename
+        let mut file = File::create(&filename)?; // create a new file for each ticker
+
+        // map each balance to a BalanceInfo
+        let balances: HashMap<String, BalanceInfo> = ticker
+            .get_balances()
+            .iter()
+            .map(|(address, user_balance)| {
+                (
+                    address.to_string(),
+                    BalanceInfo {
+                        overall_balance: user_balance.get_overall_balance(),
+                        available_balance: user_balance.get_available_balance(),
+                        transferable_balance: user_balance.get_transferable_balance(),
+                    },
+                )
+            })
+            .collect();
+
+        // construct a TickerWithBalances
+        let ticker_with_balances = TickerWithBalances {
+            ticker: ticker.clone(),
+            balances,
+        };
+
+        // serialize and write the TickerWithBalances
+        let serialized = serde_json::to_string_pretty(&ticker_with_balances)?;
+        writeln!(file, "{}", serialized)?;
     }
-    println!();
-}
 
-fn display_output_info(raw_transaction_info: &GetRawTransactionResult, vout_index: usize) {
-    if let Some(vout) = raw_transaction_info.vout.get(vout_index) {
-        println!("----------------------------------------------");
-        println!("Vout {}", vout_index);
-        println!("- Value: {:?}", vout.value);
-        println!("- N: {:?}", vout.n);
-
-        let script_pub_key = &vout.script_pub_key;
-        println!("- Script Pub Key:");
-        println!("    - ASM: {:?}", script_pub_key.asm);
-        println!("    - Hex: {:?}", script_pub_key.hex);
-        println!("    - Required Signatures: {:?}", script_pub_key.req_sigs);
-        println!("    - Type: {:?}", script_pub_key.type_);
-        println!("    - Addresses: {:?}", script_pub_key.addresses);
-        println!("    - Address: {:?}", script_pub_key.address);
-
-        println!();
-    } else {
-        println!("Invalid vout index: {}", vout_index);
-    }
-    println!();
+    Ok(())
 }
