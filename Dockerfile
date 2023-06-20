@@ -3,11 +3,5 @@ FROM rust
 WORKDIR /usr/src/myapp
 COPY src ./src
 COPY Cargo.toml .
-RUN sleep 30
-RUN echo "RPC_URL="$RPC_URL >> .env
-RUN sleep 10
-RUN echo "RPC_USER="$RPC_USER >> .env
-RUN sleep 10
-RUN echo "RPC_PASSWORD="$RPC_PASSWORD >> .env
-#RUN cargo run
-CMD sleep 30000
+CMD ["entrypoint.sh"]
+# CMD sleep 30000
