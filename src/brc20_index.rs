@@ -469,12 +469,11 @@ pub fn write_tickers_to_file(
     tickers: &HashMap<String, Brc20Ticker>,
     filename: &str,
 ) -> std::io::Result<()> {
-    let file = File::create(filename)?;
+    let mut file = File::create(filename)?;
 
     for ticker in tickers.values() {
-        let serialized_ticker = serde_json::to_writer_pretty(file, tickers)?;
-        // Serialize ticker to a JSON string.
-        writeln!(file, "{:#?}", serialized_ticker)?; // Write the string to the file.
+        let serialized_ticker = serde_json::to_string_pretty(ticker)?;
+        writeln!(file, "{}", serialized_ticker)?;
     }
 
     Ok(())
