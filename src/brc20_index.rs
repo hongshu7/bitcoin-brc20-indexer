@@ -71,7 +71,7 @@ impl Brc20Index {
         self.invalid_tx_map.dump_to_file(path)
     }
 
-    pub fn process_active_transfer(
+    pub fn check_for_transfer_send(
         &mut self,
         rpc: &Client,
         raw_tx_info: &GetRawTransactionResult,
@@ -249,7 +249,7 @@ pub fn index_brc20(
                                 } else {
                                     // No inscription found
                                     // check if the tx is sending a transfer inscription
-                                    brc20_index.process_active_transfer(&rpc, &raw_tx)?;
+                                    brc20_index.check_for_transfer_send(&rpc, &raw_tx)?;
                                 }
                             }
                             // Increment the tx height
@@ -272,7 +272,7 @@ pub fn index_brc20(
         }
 
         // stop after reaching a certain block height
-        if current_block_height > 795150 {
+        if current_block_height > 795362 {
             break;
         }
     }
