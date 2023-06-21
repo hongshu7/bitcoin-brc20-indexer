@@ -1,9 +1,7 @@
-use bitcoin::{Address, OutPoint, Txid};
-use bitcoincore_rpc::bitcoincore_rpc_json::{GetRawTransactionResult, GetRawTransactionResultVin};
+use super::Brc20Inscription;
+use bitcoin::Txid;
 use serde::Serialize;
 use std::{collections::HashMap, fmt, fs::File, io::Write};
-
-use super::Brc20Inscription;
 
 // InvalidBrc20Tx represents an invalid BRC20 transaction,
 // storing the id of the transaction, the faulty inscription and the reason why it's invalid.

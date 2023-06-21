@@ -52,10 +52,6 @@ impl Brc20Mint {
         &self.inscription
     }
 
-    pub fn get_raw_tx(&self) -> &GetRawTransactionResult {
-        &self.tx
-    }
-
     pub fn validate_mint<'a>(
         mut self,
         ticker_map: &'a mut HashMap<String, Brc20Ticker>,
