@@ -1,4 +1,5 @@
 use mongodb::bson::{Document, DateTime, self, Bson};
+use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 
 pub struct BRC20Ticker {
     pub tick: str,
@@ -62,6 +63,7 @@ pub struct Balance {
 }
 
 /// Mongo collections
+///
 /// 
 
 const COLLECTION_TICKERS: str = "brc20_tickers";
@@ -85,6 +87,23 @@ pub struct TickerDB {
     pub created_at: DateTime,
 }
 
+impl bson::ToDocument for TickerDB {
+    fn to_document(&self) -> Document {
+        doc! {
+            "_id": self.id.clone(),
+            "tick": self.tick.clone(),
+            "limit": self.limit,
+            "max_supply": self.max_supply,
+            "decimals": self.decimals,
+            "deploy": self.deploy.clone(),
+            "mints": self.mints.clone(),
+            "transfers": self.transfers.clone(),
+            "invalids": self.invalids.clone(),
+            "created_at": self.created_at.clone(),
+        }
+    }
+}
+
 pub struct DeployDB {
     pub id: bson::oid,
     pub ticker_id: bson::iod,
@@ -99,6 +118,24 @@ pub struct DeployDB {
     pub created_at: DateTime,
 }
 
+impl bson::ToDocument for DeployDB {
+    fn to_document(&self) -> Document {
+        doc! {
+            "_id": self.id.clone(),
+            "ticker_id": self.ticker_id.clone(),
+            "max": self.max,
+            "lim": self.lim,
+            "dec": self.dec,
+            "block_height": self.block_height,
+            "tx_height": self.tx_height,
+            "tx": self.tx.to_document(), // Convert GetRawTransactionResult to document
+            "inscription": self.inscription.to_document(),
+            "is_valid": self.is_valid,
+            "created_at": self.created_at.clone(),
+        }
+    }
+}
+
 pub struct MintDB {
     pub id: bson::oid,
     pub ticker_id: bson::iod,
@@ -110,6 +147,23 @@ pub struct MintDB {
     pub inscription: Inscription,
     pub is_valid: bool,
     pub created_at: DateTime,
+}
+
+impl bson::ToDocument for MintDB {
+    fn to_document(&self) -> Document {
+        doc! {
+            "_id": self.id.clone(),
+            "ticker_id": self.ticker_id.clone(),
+            "amt": self.amt,
+            "block_height": self.block_height,
+            "tx_height": self.tx_height,
+            "block_time": self.block_time,
+            "tx": self.tx.to_document(), // Convert GetRawTransactionResult to document
+            "inscription": self.inscription.to_document(),
+            "is_valid": self.is_valid,
+            "created_at": self.created_at.clone(),
+        }
+    }
 }
 
 pub struct TransferDB {
@@ -126,6 +180,24 @@ pub struct TransferDB {
     pub created_at: DateTime,
 }
 
+impl bson::ToDocument for TransferDB {
+    fn to_document(&self) -> Document {
+        doc! {
+            "_id": self.id.clone(),
+            "ticker_id": self.ticker_id.clone(),
+            "amt": self.amt,
+            "block_height": self.block_height,
+            "tx_height": self.tx_height,
+            "tx": self.tx.to_document(), // Convert GetRawTransactionResult to document
+            "inscription": self.inscription.to_document(),
+            "send_tx": self.send_tx.clone().map(|tx| tx.to_document()), // Convert Option<GetRawTransactionResult> to document
+            "receiver": self.receiver.clone(),
+            "is_valid": self.is_valid,
+            "created_at": self.created_at.clone(),
+        }
+    }
+}
+
 pub struct BRC20Invalid {
     pub id: bson::oid,
     pub ticker_id: bson::iod,
@@ -133,7 +205,6 @@ pub struct BRC20Invalid {
 }
 
 pub struct InscriptionDB {
-    pub id: bson::oid,
     pub p: str,
     pub op: str,
     pub tick: str,
@@ -141,13 +212,57 @@ pub struct InscriptionDB {
     pub max: Option<str>,
     pub lim: Option<str>,
     pub dec: Option<str>,
-    pub created_at: DateTime,
+}
+
+impl bson::ToDocument for InscriptionDB {
+    fn to_document(&self) -> Document {
+        doc! {
+            "p": self.p.clone(),
+            "op": self.op.clone(),
+            "tick": self.tick.clone(),
+            "amt": self.amt.clone(),
+            "max": self.max.clone(),
+            "lim": self.lim.clone(),
+            "dec": self.dec.clone(),
+        }
+    }
 }
 
 pub struct TransactionDB {
     pub id: bson::oid,
     pub tx: GetRawTransactionResult,
     pub created_at: DateTime,
+}
+
+impl bson::ToDocument for TransactionDB {
+    fn to_document(&self) -> Document {
+        doc! {
+            "_id": self.id.clone(),
+            "tx": self.tx.to_document(), // Convert GetRawTransactionResult to document
+            "created_at": self.created_at.clone(),
+        }
+    }
+}
+
+impl bson::ToDocument for GetRawTransactionResult {
+    fn to_document(&self) -> Document {
+        doc! {
+            "in_active_chain": self.in_active_chain.clone(),
+            "hex": self.hex.clone(),
+            "txid": self.txid.to_string(),
+            "hash": self.hash.to_string(),
+            "size": self.size,
+            "vsize": self.vsize,
+            "version": self.version,
+            "locktime": self.locktime,
+            "vin": self.vin.iter().map(|vin| vin.to_document()).collect::<Vec<Document>>(),
+            "vout": self.vout.iter().map(|vout| vout.to_document()).collect::<Vec<Document>>(),
+            "blockhash": self.blockhash.clone().map(|blockhash| blockhash.to_string()),
+            "confirmations": self.confirmations.clone(),
+            "time": self.time.clone(),
+            "blocktime": self.blocktime.clone(),
+        }
+    }
 }
 
 pub struct Balance {
