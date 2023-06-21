@@ -187,14 +187,14 @@ impl Brc20Index {
 
 pub fn index_brc20(
     rpc: &Client,
-    start_block_height: u64,
+    start_block_height: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Instantiate a new `Brc20Index` struct.
     let mut brc20_index = Brc20Index::new();
 
     let mut current_block_height = start_block_height;
     loop {
-        match rpc.get_block_hash(current_block_height) {
+        match rpc.get_block_hash(current_block_height.into()) {
             Ok(current_block_hash) => {
                 match rpc.get_block(&current_block_hash) {
                     Ok(block) => {
@@ -204,6 +204,7 @@ pub fn index_brc20(
                             current_block_hash, length, current_block_height
                         );
 
+                        let mut tx_height = 0u32;
                         for transaction in block.txdata {
                             let txid = transaction.txid();
                             // Get Raw Transaction
@@ -229,7 +230,9 @@ pub fn index_brc20(
                                     match &inscription.op[..] {
                                         "deploy" => handle_deploy_operation(
                                             inscription,
-                                            brc20_tx,
+                                            raw_tx.clone(),
+                                            current_block_height,
+                                            tx_height,
                                             &mut brc20_index,
                                         )?,
                                         "mint" => handle_mint_operation(
@@ -253,6 +256,8 @@ pub fn index_brc20(
                                     brc20_index.process_active_transfer(&rpc, &raw_tx)?;
                                 }
                             }
+                            // Increment the tx height
+                            tx_height += 1;
                         }
 
                         // Increment the block height

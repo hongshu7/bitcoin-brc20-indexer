@@ -1,5 +1,5 @@
 use super::{
-    deploy::Brc20DeployTx, mint::Brc20MintTx, transfer::Brc20TransferTx, user_balance::UserBalance,
+    deploy::Brc20Deploy, mint::Brc20MintTx, transfer::Brc20TransferTx, user_balance::UserBalance,
 };
 use bitcoin::{Address, OutPoint};
 use serde::Serialize;
@@ -20,14 +20,14 @@ pub struct Brc20Ticker {
     max_supply: f64,
     total_minted: f64,
     decimals: u8,
-    deploy_tx: Brc20DeployTx,
+    deploy_tx: Brc20Deploy,
     mints: Vec<Brc20MintTx>,
     transfers: Vec<Brc20TransferTx>,
     balances: HashMap<Address, UserBalance>,
 }
 
 impl Brc20Ticker {
-    pub fn new(deploy_tx: Brc20DeployTx) -> Brc20Ticker {
+    pub fn new(deploy_tx: Brc20Deploy) -> Brc20Ticker {
         let ticker = deploy_tx.get_deploy_script().tick.clone();
         let limit = deploy_tx.get_limit();
         let max_supply = deploy_tx.get_max_supply();

@@ -1,44 +1,63 @@
 use super::brc20_tx::{Brc20Tx, InvalidBrc20Tx, InvalidBrc20TxMap};
 use super::Brc20Index;
 use super::{brc20_ticker::Brc20Ticker, utils::convert_to_float, Brc20Inscription};
+use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use log::info;
 use serde::Serialize;
 use std::{collections::HashMap, fmt};
 
+// #[derive(Debug, Clone, Serialize)]
+// pub struct Brc20DeployTx {
+//     max_supply: f64,
+//     limit: f64,
+//     decimals: u8,
+//     brc20_tx: Brc20Tx,
+//     deploy_script: Brc20Inscription,
+//     is_valid: bool,
+// }
 #[derive(Debug, Clone, Serialize)]
-pub struct Brc20DeployTx {
-    max_supply: f64,
-    limit: f64,
-    decimals: u8,
-    brc20_tx: Brc20Tx,
-    deploy_script: Brc20Inscription,
-    is_valid: bool,
+pub struct Brc20Deploy {
+    pub max: f64,
+    pub lim: f64,
+    pub dec: u8,
+    pub block_height: u32,
+    pub tx_height: u32,
+    pub tx: GetRawTransactionResult,
+    pub inscription: Brc20Inscription,
+    pub is_valid: bool,
 }
 
-impl Brc20DeployTx {
-    pub fn new(brc20_tx: Brc20Tx, deploy_script: Brc20Inscription) -> Self {
+impl Brc20Deploy {
+    pub fn new(
+        tx: GetRawTransactionResult,
+        inscription: Brc20Inscription,
+        block_height: u32,
+        tx_height: u32,
+    ) -> Self {
         // populate with default values
-        Brc20DeployTx {
-            max_supply: 0.0,
-            limit: 0.0,
-            decimals: 18,
-            brc20_tx,
-            deploy_script,
+        Brc20Deploy {
+            max: 0.0,
+            lim: 0.0,
+            dec: 18,
+            block_height,
+            tx_height,
+            tx,
+            inscription,
             is_valid: false,
         }
     }
 
     // getters and setters
     pub fn get_max_supply(&self) -> f64 {
-        self.max_supply
+        self.max
     }
 
     pub fn get_limit(&self) -> f64 {
-        self.limit
+        self.lim
     }
 
     pub fn get_decimals(&self) -> u8 {
-        self.decimals
+        self.dec
     }
 
     pub fn is_valid(&self) -> bool {
@@ -51,11 +70,11 @@ impl Brc20DeployTx {
     }
 
     pub fn get_deploy_script(&self) -> &Brc20Inscription {
-        &self.deploy_script
+        &self.inscription
     }
 
-    pub fn get_brc20_tx(&self) -> &Brc20Tx {
-        &self.brc20_tx
+    pub fn get_raw_tx(&self) -> &GetRawTransactionResult {
+        &self.tx
     }
 
     pub fn validate_deploy_script(
@@ -63,7 +82,7 @@ impl Brc20DeployTx {
         invalid_tx_map: &mut InvalidBrc20TxMap,
         ticker_map: &HashMap<String, Brc20Ticker>,
     ) -> Self {
-        let ticker_symbol = self.deploy_script.tick.to_lowercase();
+        let ticker_symbol = self.inscription.tick.to_lowercase();
 
         let mut reasons = vec![];
 
@@ -79,14 +98,14 @@ impl Brc20DeployTx {
 
         match self.validate_max_field() {
             Ok(max) => {
-                self.max_supply = max;
+                self.max = max;
             }
             Err(reason) => reasons.push(reason),
         }
 
-        match self.validate_limit_field(self.max_supply) {
+        match self.validate_limit_field(self.max) {
             Ok(limit) => {
-                self.limit = limit;
+                self.lim = limit;
             }
             Err(reason) => reasons.push(reason),
         }
@@ -96,8 +115,8 @@ impl Brc20DeployTx {
         if !valid_deploy_tx.is_valid() {
             let reason = reasons.join("; ");
             let invalid_tx = InvalidBrc20Tx::new(
-                *valid_deploy_tx.get_brc20_tx().get_txid(),
-                valid_deploy_tx.deploy_script.clone(),
+                valid_deploy_tx.get_raw_tx().txid,
+                valid_deploy_tx.inscription.clone(),
                 reason,
             );
             invalid_tx_map.add_invalid_tx(invalid_tx);
@@ -113,7 +132,7 @@ impl Brc20DeployTx {
     ) -> Result<(), String> {
         if ticker_map.contains_key(ticker_symbol) {
             Err("Ticker symbol already exists".to_string())
-        } else if self.deploy_script.tick.chars().count() != 4 {
+        } else if self.inscription.tick.chars().count() != 4 {
             Err("Ticker symbol must be 4 characters long".to_string())
         } else {
             Ok(())
@@ -121,7 +140,7 @@ impl Brc20DeployTx {
     }
 
     fn validate_decimals_field(&mut self) -> Result<(), String> {
-        if let Some(decimals) = &self.deploy_script.dec {
+        if let Some(decimals) = &self.inscription.dec {
             let parsed_decimals = match decimals.parse::<u8>() {
                 Ok(value) => value,
                 Err(_) => return Err("Decimals field must be a valid unsigned integer".to_string()),
@@ -131,17 +150,17 @@ impl Brc20DeployTx {
                 return Err("Decimals must be 18 or less".to_string());
             }
 
-            self.decimals = parsed_decimals;
+            self.dec = parsed_decimals;
         }
 
         Ok(())
     }
 
     fn validate_max_field(&self) -> Result<f64, String> {
-        match &self.deploy_script.max {
-            Some(max_str) => match convert_to_float(max_str, self.decimals) {
+        match &self.inscription.max {
+            Some(max_str) => match convert_to_float(max_str, self.dec) {
                 Ok(max) => {
-                    if max > 0.0 && decimal_places(max) <= self.decimals.into() {
+                    if max > 0.0 && decimal_places(max) <= self.dec.into() {
                         Ok(max)
                     } else {
                         Err("Max supply must be greater than 0 and the number of decimal places must not exceed the decimal value.".to_string())
@@ -154,10 +173,10 @@ impl Brc20DeployTx {
     }
 
     fn validate_limit_field(&self, max: f64) -> Result<f64, String> {
-        match &self.deploy_script.lim {
-            Some(lim_str) => match convert_to_float(lim_str, self.decimals) {
+        match &self.inscription.lim {
+            Some(lim_str) => match convert_to_float(lim_str, self.dec) {
                 Ok(limit) => {
-                    if limit <= max && decimal_places(limit) <= self.decimals.into() {
+                    if limit <= max && decimal_places(limit) <= self.dec.into() {
                         Ok(limit)
                     } else {
                         Err("Limit must be less than or equal to max supply and the number of decimal places must not exceed the decimal value.".to_string())
@@ -172,10 +191,12 @@ impl Brc20DeployTx {
 
 pub fn handle_deploy_operation(
     inscription: Brc20Inscription,
-    brc20_tx: Brc20Tx,
+    raw_tx: GetRawTransactionResult,
+    block_height: u32,
+    tx_height: u32,
     brc20_index: &mut Brc20Index,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let validated_deploy_tx = Brc20DeployTx::new(brc20_tx, inscription)
+    let validated_deploy_tx = Brc20Deploy::new(raw_tx, inscription, block_height, tx_height)
         .validate_deploy_script(&mut brc20_index.invalid_tx_map, &brc20_index.tickers);
 
     if validated_deploy_tx.is_valid() {
@@ -198,17 +219,17 @@ fn decimal_places(num: f64) -> u32 {
     }
 }
 
-impl fmt::Display for Brc20DeployTx {
+impl fmt::Display for Brc20Deploy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Deploy Transaction:")?;
-        writeln!(f, "{}", self.brc20_tx)?;
-        writeln!(f, "Deploy Script: {:#?}", self.deploy_script)?;
+        writeln!(f, "Deploy TransactionId:")?;
+        writeln!(f, "{}", self.get_raw_tx().txid)?;
+        writeln!(f, "Deploy Script: {:#?}", self.inscription)?;
         writeln!(f, "Is Valid: {}", self.is_valid)?;
 
         // Additional information based on the fields of Brc20DeployTx
-        writeln!(f, "Max Supply: {}", self.max_supply)?;
-        writeln!(f, "Limit: {}", self.limit)?;
-        writeln!(f, "Decimals: {}", self.decimals)?;
+        writeln!(f, "Max Supply: {}", self.max)?;
+        writeln!(f, "Limit: {}", self.lim)?;
+        writeln!(f, "Decimals: {}", self.dec)?;
 
         Ok(())
     }
