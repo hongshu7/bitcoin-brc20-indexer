@@ -4,7 +4,7 @@
 ### getting started
 
 #### pre-requisites
-* full BTC node (unparsed -- start with `bitcoind --txindex`) running locally
+* full BTC node (unparsed -- started with `bitcoind --txindex`) running locally
 * rust
 
 start node with `bitcoin.conf` settings as such:
