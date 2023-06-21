@@ -81,6 +81,7 @@ pub struct TickerDB {
     pub deploy: bson::oid,
     pub mints: Vec<bson::oid>,
     pub transfers: Vec<bson::oid>,
+    pub invalids: Vex<bson::oid>,
     pub created_at: DateTime,
 }
 
