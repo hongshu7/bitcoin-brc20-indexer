@@ -43,6 +43,10 @@ pub struct BRC20Transfer {
     pub is_valid: bool,
 }
 
+pub struct BRC20Invalid {
+    // todo: SAM
+}
+
 pub struct BRC20Inscription {
     pub p: str,
     pub op: str,
@@ -54,10 +58,6 @@ pub struct BRC20Inscription {
 }
 
 pub struct Balance {
-    // todo: SAM
-}
-
-pub struct Invalid {
     // todo: SAM
 }
 
@@ -123,6 +123,12 @@ pub struct TransferDB {
     pub send_tx: Option<GetRawTransactionResult>,
     pub receiver: Option<Address>,
     pub is_valid: bool,
+    pub created_at: DateTime,
+}
+
+pub struct BRC20Invalid {
+    pub id: bson::oid,
+    pub ticker_id: bson::iod,
     pub created_at: DateTime,
 }
 
