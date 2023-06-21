@@ -1,13 +1,13 @@
-use super::{mint::Brc20Mint, transfer::Brc20TransferTx};
+use super::{mint::Brc20Mint, transfer::Brc20Transfer};
 use bitcoin::OutPoint;
 use serde::Serialize;
 use std::{collections::HashMap, fmt};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UserBalance {
-    active_transfer_inscriptions: HashMap<OutPoint, Brc20TransferTx>,
-    transfer_sends: Vec<Brc20TransferTx>,
-    transfer_receives: Vec<Brc20TransferTx>,
+    active_transfer_inscriptions: HashMap<OutPoint, Brc20Transfer>,
+    transfer_sends: Vec<Brc20Transfer>,
+    transfer_receives: Vec<Brc20Transfer>,
     mints: Vec<Brc20Mint>,
 }
 
@@ -28,7 +28,7 @@ impl UserBalance {
             .sum()
     }
 
-    pub fn add_transfer_inscription(&mut self, transfer_inscription: Brc20TransferTx) {
+    pub fn add_transfer_inscription(&mut self, transfer_inscription: Brc20Transfer) {
         self.active_transfer_inscriptions.insert(
             transfer_inscription.get_inscription_outpoint(),
             transfer_inscription.clone(),
@@ -45,7 +45,7 @@ impl UserBalance {
         );
     }
 
-    pub fn remove_inscription(&mut self, outpoint: &OutPoint) -> Option<Brc20TransferTx> {
+    pub fn remove_inscription(&mut self, outpoint: &OutPoint) -> Option<Brc20Transfer> {
         self.active_transfer_inscriptions.remove(&outpoint)
     }
 
@@ -54,7 +54,7 @@ impl UserBalance {
     }
 
     // get active transfer inscriptions
-    pub fn get_active_transfer_inscriptions(&self) -> &HashMap<OutPoint, Brc20TransferTx> {
+    pub fn get_active_transfer_inscriptions(&self) -> &HashMap<OutPoint, Brc20Transfer> {
         &self.active_transfer_inscriptions
     }
 
@@ -90,11 +90,11 @@ impl UserBalance {
             .sum()
     }
 
-    pub fn add_transfer_send(&mut self, transfer_send: Brc20TransferTx) {
+    pub fn add_transfer_send(&mut self, transfer_send: Brc20Transfer) {
         self.transfer_sends.push(transfer_send);
     }
 
-    pub fn add_transfer_receive(&mut self, transfer_receive: Brc20TransferTx) {
+    pub fn add_transfer_receive(&mut self, transfer_receive: Brc20Transfer) {
         self.transfer_receives.push(transfer_receive);
     }
 }

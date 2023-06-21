@@ -1,5 +1,5 @@
 use super::{
-    deploy::Brc20Deploy, mint::Brc20Mint, transfer::Brc20TransferTx, user_balance::UserBalance,
+    deploy::Brc20Deploy, mint::Brc20Mint, transfer::Brc20Transfer, user_balance::UserBalance,
 };
 use bitcoin::{Address, OutPoint};
 use serde::Serialize;
@@ -22,7 +22,7 @@ pub struct Brc20Ticker {
     decimals: u8,
     deploy_tx: Brc20Deploy,
     mints: Vec<Brc20Mint>,
-    transfers: Vec<Brc20TransferTx>,
+    transfers: Vec<Brc20Transfer>,
     balances: HashMap<Address, UserBalance>,
 }
 
@@ -62,7 +62,7 @@ impl Brc20Ticker {
     pub fn get_and_remove_active_transfer_inscription(
         &mut self,
         outpoint: &OutPoint,
-    ) -> Option<Brc20TransferTx> {
+    ) -> Option<Brc20Transfer> {
         self.balances
             .values_mut()
             .find_map(|balance| balance.remove_inscription(outpoint))
@@ -70,7 +70,7 @@ impl Brc20Ticker {
 
     // Updates the sender's balance after a transfer send operation. It either adds the transaction
     // to an existing balance or creates a new balance for the sender if it doesn't already exist.
-    pub fn update_transfer_sends(&mut self, sender: Address, tx: Brc20TransferTx) {
+    pub fn update_transfer_sends(&mut self, sender: Address, tx: Brc20Transfer) {
         if let Some(user_balance) = self.balances.get_mut(&sender) {
             user_balance.add_transfer_send(tx.clone());
         } else {
@@ -93,7 +93,7 @@ impl Brc20Ticker {
 
     // Updates the receiver's balance after a transfer receive operation. It either adds the transaction
     // to an existing balance or creates a new balance for the receiver if it doesn't already exist.
-    pub fn update_transfer_receives(&mut self, receiver: Address, tx: Brc20TransferTx) {
+    pub fn update_transfer_receives(&mut self, receiver: Address, tx: Brc20Transfer) {
         if let Some(user_balance) = self.balances.get_mut(&receiver) {
             user_balance.add_transfer_receive(tx.clone());
         } else {

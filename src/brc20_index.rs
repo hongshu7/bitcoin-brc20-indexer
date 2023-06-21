@@ -150,13 +150,7 @@ impl Brc20Index {
 
             // Update user balances
             brc20_ticker.update_transfer_receives(receiver_address, brc20_transfer_tx.clone());
-            brc20_ticker.update_transfer_sends(
-                brc20_transfer_tx
-                    .get_inscription_brc20_tx()
-                    .get_owner()
-                    .clone(),
-                brc20_transfer_tx,
-            );
+            brc20_ticker.update_transfer_sends(brc20_transfer_tx.sender.clone(), brc20_transfer_tx);
 
             self.remove_active_transfer_balance(&outpoint);
         }
@@ -248,8 +242,11 @@ pub fn index_brc20(
                                             &mut brc20_index,
                                         )?,
                                         "transfer" => handle_transfer_operation(
+                                            current_block_height,
+                                            tx_height,
                                             inscription,
-                                            brc20_tx,
+                                            raw_tx.clone(),
+                                            owner.clone(),
                                             &mut brc20_index,
                                         )?,
                                         _ => {
