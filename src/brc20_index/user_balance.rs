@@ -5,6 +5,9 @@ use std::{collections::HashMap, fmt};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UserBalance {
+    pub overall_balance: f64,
+    pub availble_balance: f64,
+    pub transferable_balance: f64,
     active_transfer_inscriptions: HashMap<OutPoint, Brc20Transfer>,
     transfer_sends: Vec<Brc20Transfer>,
     transfer_receives: Vec<Brc20Transfer>,
@@ -14,6 +17,9 @@ pub struct UserBalance {
 impl UserBalance {
     pub fn new() -> Self {
         UserBalance {
+            overall_balance: 0.0,
+            availble_balance: 0.0,
+            transferable_balance: 0.0,
             active_transfer_inscriptions: HashMap::new(),
             transfer_sends: Vec::new(),
             transfer_receives: Vec::new(),
@@ -33,6 +39,7 @@ impl UserBalance {
             transfer_inscription.get_inscription_outpoint(),
             transfer_inscription.clone(),
         );
+        self.set_balances();
 
         // display user overall balance
         println!("User overall balance: {}", self.get_overall_balance());
@@ -51,6 +58,7 @@ impl UserBalance {
 
     pub fn add_mint_tx(&mut self, mint: Brc20Mint) {
         self.mints.push(mint);
+        self.set_balances();
     }
 
     // get active transfer inscriptions
@@ -92,10 +100,18 @@ impl UserBalance {
 
     pub fn add_transfer_send(&mut self, transfer_send: Brc20Transfer) {
         self.transfer_sends.push(transfer_send);
+        self.set_balances();
     }
 
     pub fn add_transfer_receive(&mut self, transfer_receive: Brc20Transfer) {
         self.transfer_receives.push(transfer_receive);
+        self.set_balances();
+    }
+
+    pub fn set_balances(&mut self) {
+        self.overall_balance = self.get_overall_balance();
+        self.availble_balance = self.get_available_balance();
+        self.transferable_balance = self.get_transferable_balance();
     }
 }
 
