@@ -1,6 +1,6 @@
 use mongodb::bson::{Document, DateTime, self, Bson};
 
-pub struct Ticker {
+pub struct BRC20Ticker {
     pub tick: str,
     pub limit: f64,
     pub max_supply: f64,
@@ -11,7 +11,7 @@ pub struct Ticker {
     pub balances: HashMap<Address, UserBalance>,
 }
 
-pub struct Deploy {
+pub struct BRC20Deploy {
     pub max: f64,
     pub lim: f64,
     pub dec: u8,
@@ -22,7 +22,7 @@ pub struct Deploy {
     pub is_valid: bool,
 }
 
-pub struct Mint {
+pub struct BRC20Mint {
     pub amt: f64,
     pub block_height: u32,
     pub tx_height: u32,
@@ -32,7 +32,7 @@ pub struct Mint {
     pub is_valid: bool,
 }
 
-pub struct Transfer {
+pub struct BRC20Transfer {
     pub amt: f64,
     pub block_height: u32,
     pub tx_height: u32,
@@ -43,7 +43,7 @@ pub struct Transfer {
     pub is_valid: bool,
 }
 
-pub struct Inscription {
+pub struct BRC20Inscription {
     pub p: str,
     pub op: str,
     pub tick: str,
@@ -57,14 +57,19 @@ pub struct Balance {
     // todo: SAM
 }
 
+pub struct Invalid {
+    // todo: SAM
+}
+
 /// Mongo collections
 /// 
 
-const COLLECTION_TICKERS: str = "tickers";
-const COLLECTION_DEPLOYS: str = "deploys";
-const COLLECTION_DEPLOYS: str = "mints";
-const COLLECTION_DEPLOYS: str = "transfers";
-const COLLECTION_INSCRIPTIONS: str = "inscriptions";
+const COLLECTION_TICKERS: str = "brc20_tickers";
+const COLLECTION_DEPLOYS: str = "brc20_deploys";
+const COLLECTION_MINTS: str = "brc20_mints";
+const COLLECTION_TRANSFERS: str = "brc20_transfers";
+const COLLECTION_INVALIDS: str = "brc20_invalids";
+// const COLLECTION_INSCRIPTIONS: str = "inscriptions";
 const COLLECTION_TRANSACTIONS: str = "transactions";
 
 pub struct TickerDB {
@@ -81,6 +86,7 @@ pub struct TickerDB {
 
 pub struct DeployDB {
     pub id: bson::oid,
+    pub ticker_id: bson::iod,
     pub max: f64,
     pub lim: f64,
     pub dec: u8,
@@ -94,6 +100,7 @@ pub struct DeployDB {
 
 pub struct MintDB {
     pub id: bson::oid,
+    pub ticker_id: bson::iod,
     pub amt: f64,
     pub block_height: u32,
     pub tx_height: u32,
@@ -106,6 +113,7 @@ pub struct MintDB {
 
 pub struct TransferDB {
     pub id: bson::oid,
+    pub ticker_id: bson::iod,
     pub amt: f64,
     pub block_height: u32,
     pub tx_height: u32,
