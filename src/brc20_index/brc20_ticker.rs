@@ -118,6 +118,8 @@ impl Brc20Ticker {
             user_balance.add_mint_tx(mint.clone());
             self.balances.insert(owner.clone(), user_balance);
         }
+        // update total minted tokens
+        self.total_minted += mint.amt;
         self.mints.push(mint);
 
         if let Some(user_balance) = self.get_user_balance(&owner) {
