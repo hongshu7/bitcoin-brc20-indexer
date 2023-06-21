@@ -1,8 +1,7 @@
 use self::{
     brc20_ticker::Brc20Ticker,
-    brc20_tx::Brc20Tx,
-    brc20_tx::InvalidBrc20TxMap,
     deploy::handle_deploy_operation,
+    invalid_brc20::InvalidBrc20TxMap,
     mint::handle_mint_operation,
     transfer::handle_transfer_operation,
     utils::{
@@ -18,8 +17,8 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs::DirBuilder, thread::sleep, time::Duration};
 
 mod brc20_ticker;
-mod brc20_tx;
 mod deploy;
+mod invalid_brc20;
 mod mint;
 mod transfer;
 mod user_balance;
@@ -150,7 +149,7 @@ impl Brc20Index {
 
             // Update user balances
             brc20_ticker.update_transfer_receives(receiver_address, brc20_transfer_tx.clone());
-            brc20_ticker.update_transfer_sends(brc20_transfer_tx.sender.clone(), brc20_transfer_tx);
+            brc20_ticker.update_transfer_sends(brc20_transfer_tx.from.clone(), brc20_transfer_tx);
 
             self.remove_active_transfer_balance(&outpoint);
         }
@@ -216,13 +215,6 @@ pub fn index_brc20(
 
                                     // get owner address, inscription is first satoshi of first output
                                     let owner = get_owner_of_vout(&raw_tx, 0)?;
-
-                                    // create brc20_tx
-                                    let brc20_tx = Brc20Tx::new(
-                                        &raw_tx,
-                                        owner.clone(),
-                                        current_block_height as u32,
-                                    )?;
 
                                     match &inscription.op[..] {
                                         "deploy" => handle_deploy_operation(

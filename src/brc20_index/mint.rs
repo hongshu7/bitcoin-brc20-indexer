@@ -1,6 +1,6 @@
 use super::{
     brc20_ticker::Brc20Ticker,
-    brc20_tx::{InvalidBrc20Tx, InvalidBrc20TxMap},
+    invalid_brc20::{InvalidBrc20Tx, InvalidBrc20TxMap},
     utils::convert_to_float,
     Brc20Index, Brc20Inscription,
 };
@@ -15,7 +15,7 @@ pub struct Brc20Mint {
     pub amt: f64,
     pub block_height: u32,
     pub tx_height: u32,
-    pub owner: Address,
+    pub to: Address,
     pub tx: GetRawTransactionResult,
     pub inscription: Brc20Inscription,
     pub is_valid: bool,
@@ -27,13 +27,13 @@ impl Brc20Mint {
         inscription: Brc20Inscription,
         block_height: u32,
         tx_height: u32,
-        owner: Address,
+        to: Address,
     ) -> Self {
         Brc20Mint {
             amt: 0.0,
             block_height,
             tx_height,
-            owner,
+            to,
             tx: tx.clone(),
             inscription,
             is_valid: false,
@@ -140,7 +140,7 @@ pub fn handle_mint_operation(
     // Check if the mint operation is valid.
     if validated_mint_tx.is_valid() {
         info!("Mint: {:?}", validated_mint_tx.get_mint());
-        info!("Owner Address: {:?}", validated_mint_tx.owner);
+        info!("Owner Address: {:?}", validated_mint_tx.to);
     }
     Ok(())
 }

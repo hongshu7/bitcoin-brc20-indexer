@@ -1,4 +1,4 @@
-use super::{brc20_tx::InvalidBrc20Tx, Brc20Index, Brc20Inscription};
+use super::{invalid_brc20::InvalidBrc20Tx, Brc20Index, Brc20Inscription};
 use bitcoin::{Address, OutPoint};
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use log::info;
@@ -13,8 +13,8 @@ pub struct Brc20Transfer {
     pub tx: GetRawTransactionResult,
     pub inscription: Brc20Inscription,
     pub send_tx: Option<GetRawTransactionResult>,
-    pub sender: Address,
-    pub receiver: Option<Address>,
+    pub from: Address,
+    pub to: Option<Address>,
     pub is_valid: bool,
 }
 
@@ -24,7 +24,7 @@ impl Brc20Transfer {
         inscription: Brc20Inscription,
         block_height: u32,
         tx_height: u32,
-        sender: Address,
+        from: Address,
     ) -> Self {
         let amt = inscription
             .amt
@@ -39,8 +39,8 @@ impl Brc20Transfer {
             tx: inscription_tx,
             send_tx: None,
             inscription,
-            sender,
-            receiver: None,
+            from,
+            to: None,
             is_valid: false,
         }
     }
@@ -73,7 +73,7 @@ impl Brc20Transfer {
     }
 
     pub fn handle_inscribe_transfer_amount(&mut self, index: &mut Brc20Index) {
-        let owner = &self.sender;
+        let owner = &self.from;
         let ticker_symbol = &self.inscription.tick;
 
         if let Some(ticker) = index.get_ticker_mut(ticker_symbol) {
@@ -113,7 +113,7 @@ impl Brc20Transfer {
     }
 
     pub fn set_receiver(mut self, receiver: Address) -> Self {
-        self.receiver = Some(receiver);
+        self.to = Some(receiver);
         self
     }
 }
@@ -124,7 +124,7 @@ impl fmt::Display for Brc20Transfer {
         writeln!(f, "Transfer Transaction: {:?}", self.send_tx)?;
         writeln!(f, "Transfer Script: {:#?}", self.inscription)?;
         writeln!(f, "Amount: {}", self.amt)?;
-        writeln!(f, "Receiver: {:?}", self.receiver)?;
+        writeln!(f, "Receiver: {:?}", self.to)?;
         writeln!(f, "Is Valid: {}", self.is_valid)?;
         Ok(())
     }
@@ -150,7 +150,7 @@ pub fn handle_transfer_operation(
 
     if brc20_transfer_tx.is_valid() {
         info!("Transfer: {:?}", brc20_transfer_tx.get_transfer_script());
-        info!("Sender Address: {:?}", brc20_transfer_tx.sender);
+        info!("Sender Address: {:?}", brc20_transfer_tx.from);
     }
     Ok(())
 }
