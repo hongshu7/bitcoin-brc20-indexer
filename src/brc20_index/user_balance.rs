@@ -1,4 +1,4 @@
-use super::{mint::Brc20MintTx, transfer::Brc20TransferTx};
+use super::{mint::Brc20Mint, transfer::Brc20TransferTx};
 use bitcoin::OutPoint;
 use serde::Serialize;
 use std::{collections::HashMap, fmt};
@@ -8,7 +8,7 @@ pub struct UserBalance {
     active_transfer_inscriptions: HashMap<OutPoint, Brc20TransferTx>,
     transfer_sends: Vec<Brc20TransferTx>,
     transfer_receives: Vec<Brc20TransferTx>,
-    mints: Vec<Brc20MintTx>,
+    mints: Vec<Brc20Mint>,
 }
 
 impl UserBalance {
@@ -49,7 +49,7 @@ impl UserBalance {
         self.active_transfer_inscriptions.remove(&outpoint)
     }
 
-    pub fn add_mint_tx(&mut self, mint: Brc20MintTx) {
+    pub fn add_mint_tx(&mut self, mint: Brc20Mint) {
         self.mints.push(mint);
     }
 

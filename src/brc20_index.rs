@@ -224,20 +224,27 @@ pub fn index_brc20(
                                     let owner = get_owner_of_vout(&raw_tx, 0)?;
 
                                     // create brc20_tx
-                                    let brc20_tx =
-                                        Brc20Tx::new(&raw_tx, owner, current_block_height as u32)?;
+                                    let brc20_tx = Brc20Tx::new(
+                                        &raw_tx,
+                                        owner.clone(),
+                                        current_block_height as u32,
+                                    )?;
 
                                     match &inscription.op[..] {
                                         "deploy" => handle_deploy_operation(
                                             inscription,
                                             raw_tx.clone(),
+                                            owner.clone(),
                                             current_block_height,
                                             tx_height,
                                             &mut brc20_index,
                                         )?,
                                         "mint" => handle_mint_operation(
+                                            current_block_height,
+                                            tx_height,
+                                            owner,
                                             inscription,
-                                            &brc20_tx,
+                                            &raw_tx,
                                             &mut brc20_index,
                                         )?,
                                         "transfer" => handle_transfer_operation(

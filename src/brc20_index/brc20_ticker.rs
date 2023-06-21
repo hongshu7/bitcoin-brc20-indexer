@@ -1,5 +1,5 @@
 use super::{
-    deploy::Brc20Deploy, mint::Brc20MintTx, transfer::Brc20TransferTx, user_balance::UserBalance,
+    deploy::Brc20Deploy, mint::Brc20Mint, transfer::Brc20TransferTx, user_balance::UserBalance,
 };
 use bitcoin::{Address, OutPoint};
 use serde::Serialize;
@@ -21,7 +21,7 @@ pub struct Brc20Ticker {
     total_minted: f64,
     decimals: u8,
     deploy_tx: Brc20Deploy,
-    mints: Vec<Brc20MintTx>,
+    mints: Vec<Brc20Mint>,
     transfers: Vec<Brc20TransferTx>,
     balances: HashMap<Address, UserBalance>,
 }
@@ -116,8 +116,8 @@ impl Brc20Ticker {
 
     // Adds a mint transaction to the owner's balance. If the owner's balance doesn't exist yet, it
     // creates a new one. Also updates the total minted tokens for this Brc20Ticker.
-    pub fn add_mint(&mut self, mint: Brc20MintTx) {
-        let owner = mint.get_brc20_tx().get_owner().clone();
+    pub fn add_mint(&mut self, mint: Brc20Mint) {
+        let owner = mint.owner.clone();
         // add mint to UserBalance
         if let Some(balance) = self.balances.get_mut(&owner) {
             balance.add_mint_tx(mint.clone());

@@ -1,20 +1,12 @@
-use super::brc20_tx::{Brc20Tx, InvalidBrc20Tx, InvalidBrc20TxMap};
+use super::brc20_tx::{InvalidBrc20Tx, InvalidBrc20TxMap};
 use super::Brc20Index;
 use super::{brc20_ticker::Brc20Ticker, utils::convert_to_float, Brc20Inscription};
+use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use log::info;
 use serde::Serialize;
 use std::{collections::HashMap, fmt};
 
-// #[derive(Debug, Clone, Serialize)]
-// pub struct Brc20DeployTx {
-//     max_supply: f64,
-//     limit: f64,
-//     decimals: u8,
-//     brc20_tx: Brc20Tx,
-//     deploy_script: Brc20Inscription,
-//     is_valid: bool,
-// }
 #[derive(Debug, Clone, Serialize)]
 pub struct Brc20Deploy {
     pub max: f64,
@@ -22,6 +14,7 @@ pub struct Brc20Deploy {
     pub dec: u8,
     pub block_height: u32,
     pub tx_height: u32,
+    pub owner: Address,
     pub tx: GetRawTransactionResult,
     pub inscription: Brc20Inscription,
     pub is_valid: bool,
@@ -33,6 +26,7 @@ impl Brc20Deploy {
         inscription: Brc20Inscription,
         block_height: u32,
         tx_height: u32,
+        owner: Address,
     ) -> Self {
         // populate with default values
         Brc20Deploy {
@@ -41,6 +35,7 @@ impl Brc20Deploy {
             dec: 18,
             block_height,
             tx_height,
+            owner,
             tx,
             inscription,
             is_valid: false,
@@ -115,7 +110,7 @@ impl Brc20Deploy {
         if !valid_deploy_tx.is_valid() {
             let reason = reasons.join("; ");
             let invalid_tx = InvalidBrc20Tx::new(
-                valid_deploy_tx.get_raw_tx().txid,
+                valid_deploy_tx.tx.txid,
                 valid_deploy_tx.inscription.clone(),
                 reason,
             );
@@ -192,11 +187,12 @@ impl Brc20Deploy {
 pub fn handle_deploy_operation(
     inscription: Brc20Inscription,
     raw_tx: GetRawTransactionResult,
+    owner: Address,
     block_height: u32,
     tx_height: u32,
     brc20_index: &mut Brc20Index,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let validated_deploy_tx = Brc20Deploy::new(raw_tx, inscription, block_height, tx_height)
+    let validated_deploy_tx = Brc20Deploy::new(raw_tx, inscription, block_height, tx_height, owner)
         .validate_deploy_script(&mut brc20_index.invalid_tx_map, &brc20_index.tickers);
 
     if validated_deploy_tx.is_valid() {
