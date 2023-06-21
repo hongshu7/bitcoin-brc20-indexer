@@ -5,41 +5,33 @@ use bitcoin::{Address, OutPoint};
 use serde::Serialize;
 use std::collections::HashMap;
 
-// methods implement various functionality for the Brc20Ticker, such as:
-//  - checking if a user has an active transfer inscription
-//  - getting and removing active transfer inscriptions
-//  - updating transfer sends and receives
-//  - adding mint transactions
-//  - getting balances, mint transactions, transfer transactions, etc.
-//  - adding user balance
-//  - displaying BRC20 ticker info
 #[derive(Debug, Clone, Serialize)]
 pub struct Brc20Ticker {
-    ticker: String,
-    limit: f64,
-    max_supply: f64,
-    total_minted: f64,
-    decimals: u8,
-    deploy_tx: Brc20Deploy,
-    mints: Vec<Brc20Mint>,
-    transfers: Vec<Brc20Transfer>,
-    balances: HashMap<Address, UserBalance>,
+    pub tick: String,
+    pub limit: f64,
+    pub max_supply: f64,
+    pub total_minted: f64,
+    pub decimals: u8,
+    pub deploy: Brc20Deploy,
+    pub mints: Vec<Brc20Mint>,
+    pub transfers: Vec<Brc20Transfer>,
+    pub balances: HashMap<Address, UserBalance>,
 }
 
 impl Brc20Ticker {
-    pub fn new(deploy_tx: Brc20Deploy) -> Brc20Ticker {
-        let ticker = deploy_tx.get_deploy_script().tick.clone();
-        let limit = deploy_tx.get_limit();
-        let max_supply = deploy_tx.get_max_supply();
-        let decimals = deploy_tx.get_decimals();
+    pub fn new(deploy: Brc20Deploy) -> Brc20Ticker {
+        let tick = deploy.get_deploy_script().tick.clone();
+        let limit = deploy.get_limit();
+        let max_supply = deploy.get_max_supply();
+        let decimals = deploy.get_decimals();
 
         Brc20Ticker {
-            ticker,
+            tick,
             limit,
             max_supply,
             total_minted: 0.0,
             decimals,
-            deploy_tx,
+            deploy,
             mints: Vec::new(),
             transfers: Vec::new(),
             balances: HashMap::new(),
@@ -138,7 +130,7 @@ impl Brc20Ticker {
           );
             log::info!(
                 "Total minted tokens for ticker {}:  {}",
-                self.ticker,
+                self.tick,
                 self.get_total_supply()
             );
         }
@@ -164,7 +156,7 @@ impl Brc20Ticker {
     }
 
     pub fn get_ticker(&self) -> String {
-        self.ticker.to_lowercase()
+        self.tick.to_lowercase()
     }
 
     pub fn get_decimals(&self) -> u8 {
