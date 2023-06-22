@@ -83,10 +83,10 @@ impl Brc20Index {
             let ticker = match self.get_active_transfer_inscription_ticker(&outpoint) {
                 Some(ticker) => ticker,
                 None => {
-                    // log::error!(
-                    //     "No active transfer inscription for outpoint: {:?}",
-                    //     outpoint
-                    // );
+                    log::debug!(
+                        "No active transfer inscription for outpoint: {:?}",
+                        outpoint
+                    );
                     continue;
                 }
             };
@@ -94,7 +94,7 @@ impl Brc20Index {
             let brc20_ticker = match self.get_ticker_mut(&ticker) {
                 Some(brc20_ticker) => brc20_ticker,
                 None => {
-                    log::error!("Ticker {} not found", ticker);
+                    log::error!("Inscription found but ticker {} not found", ticker);
                     continue;
                 }
             };
@@ -111,10 +111,10 @@ impl Brc20Index {
                 match brc20_ticker.get_and_remove_active_transfer_inscription(&outpoint) {
                     Some(brc20_transfer_tx) => brc20_transfer_tx,
                     None => {
-                        // log::error!(
-                        //     "Active transfer inscription not found for outpoint: {:?}",
-                        //     outpoint
-                        // );
+                        log::debug!(
+                            "Active transfer inscription not found for outpoint: {:?}",
+                            outpoint
+                        );
                         continue;
                     }
                 };
