@@ -10,12 +10,9 @@ use std::env;
 mod brc20_index;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Set the RUST_LOG environment variable to enable info logs
-    env::set_var("RUST_LOG", "info");
-
     // Initialize logger and load env variables
-    env_logger::init();
     dotenv().ok();
+    env_logger::init();
 
     // Retrieve the RPC url, user and password from environment variables
     let rpc_url = env::var("RPC_URL").unwrap();
