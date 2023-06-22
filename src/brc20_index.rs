@@ -21,7 +21,6 @@ use log::{error, info};
 use mongodb::bson::{doc, Document};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs::DirBuilder, thread::sleep, time::Duration};
-use tokio::runtime::Runtime;
 
 mod brc20_ticker;
 mod consts;

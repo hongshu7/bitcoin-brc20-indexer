@@ -175,7 +175,7 @@ pub async fn handle_transfer_operation(
     let mut validated_transfer_tx =
         Brc20Transfer::new(raw_tx, inscription, block_height, tx_height, sender);
 
-    validated_transfer_tx.handle_inscribe_transfer(brc20_index, mongo_client);
+    let _ = validated_transfer_tx.handle_inscribe_transfer(brc20_index, mongo_client);
 
     brc20_index.update_active_transfer_inscription(
         validated_transfer_tx.get_inscription_outpoint(),

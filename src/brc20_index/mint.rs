@@ -10,7 +10,7 @@ use super::{
 use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use log::{error, info};
-use mongodb::bson::{self, doc, Document};
+use mongodb::bson::{doc, Document};
 use serde::Serialize;
 use std::{collections::HashMap, fmt};
 
