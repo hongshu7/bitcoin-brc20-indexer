@@ -1,17 +1,22 @@
+use crate::mongo::MongoClient;
+
 use super::{
     brc20_ticker::Brc20Ticker,
+    consts,
     invalid_brc20::{InvalidBrc20Tx, InvalidBrc20TxMap},
     utils::convert_to_float,
-    Brc20Index, Brc20Inscription,
+    Brc20Index, Brc20Inscription, ToDocument,
 };
 use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use log::{error, info};
+use mongodb::bson::{self, doc, Document};
 use serde::Serialize;
 use std::{collections::HashMap, fmt};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Brc20Mint {
+    // pub id: Option<bson::oid>,
     pub amt: f64,
     pub block_height: u32,
     pub tx_height: u32,
@@ -19,6 +24,23 @@ pub struct Brc20Mint {
     pub tx: GetRawTransactionResult,
     pub inscription: Brc20Inscription,
     pub is_valid: bool,
+}
+
+impl ToDocument for Brc20Mint {
+    fn to_document(&self) -> Document {
+        doc! {
+            // "_id": self.id.clone(),
+            // "ticker_id": self.ticker_id.clone(),
+            "amt": self.amt,
+            "block_height": self.block_height,
+            "tx_height": self.tx_height,
+            "to": self.to.to_string(),
+            "tx": self.tx.to_document(), // Convert GetRawTransactionResult to document
+            "inscription": self.inscription.to_document(),
+            "is_valid": self.is_valid,
+            // "created_at": self.created_at.clone(),
+        }
+    }
 }
 
 impl Brc20Mint {
@@ -52,11 +74,12 @@ impl Brc20Mint {
         &self.inscription
     }
 
-    pub fn validate_mint<'a>(
+    pub async fn validate_mint<'a>(
         mut self,
         ticker_map: &'a mut HashMap<String, Brc20Ticker>,
         invalid_tx_map: &'a mut InvalidBrc20TxMap,
-    ) -> Brc20Mint {
+        mongo_client: &MongoClient,
+    ) -> Result<Brc20Mint, Box<dyn std::error::Error>> {
         let mut is_valid = true;
         let mut reason = String::new();
 
@@ -101,7 +124,12 @@ impl Brc20Mint {
         if !is_valid {
             error!("INVALID: {}", reason);
             let invalid_tx = InvalidBrc20Tx::new(self.tx.txid, self.inscription.clone(), reason);
-            invalid_tx_map.add_invalid_tx(invalid_tx);
+            invalid_tx_map.add_invalid_tx(invalid_tx.clone());
+
+            // Insert the invalid mint inscription into MongoDB
+            mongo_client
+                .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
+                .await?;
         } else {
             // Set is_valid to true when the transaction is valid
             is_valid = true;
@@ -110,7 +138,7 @@ impl Brc20Mint {
         }
 
         self.is_valid = is_valid;
-        self
+        Ok(self)
     }
 }
 
@@ -124,7 +152,8 @@ impl fmt::Display for Brc20Mint {
     }
 }
 
-pub fn handle_mint_operation(
+pub async fn handle_mint_operation(
+    mongo_client: &MongoClient,
     block_height: u32,
     tx_height: u32,
     owner: Address,
@@ -133,12 +162,25 @@ pub fn handle_mint_operation(
     brc20_index: &mut Brc20Index,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let validated_mint_tx = Brc20Mint::new(&raw_tx, inscription, block_height, tx_height, owner)
-        .validate_mint(&mut brc20_index.tickers, &mut brc20_index.invalid_tx_map);
+        .validate_mint(
+            &mut brc20_index.tickers,
+            &mut brc20_index.invalid_tx_map,
+            mongo_client,
+        )
+        .await?;
 
     // Check if the mint operation is valid.
     if validated_mint_tx.is_valid() {
         info!("Mint: {:?}", validated_mint_tx.get_mint());
         info!("TO Address: {:?}", validated_mint_tx.to);
     }
+
+    // Add the mint transaction to the mongo database
+    mongo_client
+        .insert_document(consts::COLLECTION_MINTS, validated_mint_tx.to_document())
+        .await?;
+
+    //TODO: update userbalance and ticker structs in mongodb
+
     Ok(())
 }

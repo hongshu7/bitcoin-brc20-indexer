@@ -8,8 +8,10 @@ use log::info;
 use std::env;
 
 mod brc20_index;
+mod mongo;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logger and load env variables
     dotenv().ok();
     env_logger::init();
@@ -24,10 +26,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Connected to Bitcoin Core");
 
     // block height to start indexing from
-    let start_block_height = 790000; // 779832 is starting block height for BRC20
+    // TODO: get this from the database
+    let start_block_height = 795300; // 779832 is starting block height for BRC20
 
     // LFG!
-    index_brc20(&rpc, start_block_height)?;
+    index_brc20(&rpc, start_block_height).await?;
 
     Ok(())
 }

@@ -208,3 +208,40 @@ pub fn write_tickers_to_file(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_convert_to_float_no_decimal() {
+        let result = convert_to_float("1000", 2);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 1000.0);
+    }
+
+    #[test]
+    fn test_convert_to_float_with_decimal() {
+        let result = convert_to_float("1234.56", 2);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 1234.56);
+    }
+
+    #[test]
+    fn test_convert_to_float_too_many_decimals() {
+        let result = convert_to_float("1234.567", 2);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_convert_to_float_not_a_number() {
+        let result = convert_to_float("abcd", 2);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_convert_to_float_multiple_decimal_points() {
+        let result = convert_to_float("1.2.3", 2);
+        assert!(result.is_err());
+    }
+}

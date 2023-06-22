@@ -1,5 +1,5 @@
-use mongodb::bson::{Document, DateTime, self, Bson};
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
+use mongodb::bson::{self, Bson, DateTime, Document};
 
 pub struct BRC20Ticker {
     pub tick: str,
@@ -19,7 +19,7 @@ pub struct BRC20Deploy {
     pub block_height: u32,
     pub tx_height: u32,
     pub tx: GetRawTransactionResult,
-    pub inscription: Inscription,
+    pub inscription: Brc20Inscription,
     pub is_valid: bool,
 }
 
@@ -64,7 +64,7 @@ pub struct Balance {
 
 /// Mongo collections
 ///
-/// 
+///
 
 const COLLECTION_TICKERS: str = "brc20_tickers";
 const COLLECTION_DEPLOYS: str = "brc20_deploys";

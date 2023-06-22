@@ -1,3 +1,5 @@
+use crate::mongo::MongoClient;
+
 use self::{
     brc20_ticker::Brc20Ticker,
     deploy::handle_deploy_operation,
@@ -10,13 +12,19 @@ use self::{
     },
 };
 use bitcoin::OutPoint;
-use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
+use bitcoincore_rpc::bitcoincore_rpc_json::{
+    GetRawTransactionResult, GetRawTransactionResultVin, GetRawTransactionResultVout,
+    GetRawTransactionResultVoutScriptPubKey,
+};
 use bitcoincore_rpc::{self, Client, RpcApi};
 use log::{error, info};
+use mongodb::bson::{doc, Document};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs::DirBuilder, thread::sleep, time::Duration};
+use tokio::runtime::Runtime;
 
 mod brc20_ticker;
+mod consts;
 mod deploy;
 mod invalid_brc20;
 mod mint;
@@ -33,6 +41,24 @@ pub struct Brc20Inscription {
     pub max: Option<String>,
     pub lim: Option<String>,
     pub dec: Option<String>,
+}
+
+trait ToDocument {
+    fn to_document(&self) -> Document;
+}
+
+impl ToDocument for Brc20Inscription {
+    fn to_document(&self) -> Document {
+        doc! {
+            "p": &self.p,
+            "op": &self.op,
+            "tick": &self.tick,
+            "amt": &self.amt,
+            "max": &self.max,
+            "lim": &self.lim,
+            "dec": &self.dec,
+        }
+    }
 }
 
 //implement Display for Brc20Inscription
@@ -71,8 +97,9 @@ impl Brc20Index {
         self.invalid_tx_map.dump_to_file(path)
     }
 
-    pub fn check_for_transfer_send(
+    pub async fn check_for_transfer_send(
         &mut self,
+        mongo_client: &MongoClient,
         rpc: &Client,
         raw_tx_info: &GetRawTransactionResult,
     ) -> Result<(), anyhow::Error> {
@@ -151,7 +178,7 @@ impl Brc20Index {
 
             let receiver_address = get_owner_of_vout(&raw_tx_info, proper_vout)?;
 
-            // create transfer transaction
+            // update transfer struct with receiver address
             let brc20_transfer_tx = brc20_transfer_tx
                 .set_receiver(receiver_address.clone())
                 .set_transfer_tx(raw_tx_info.clone());
@@ -161,6 +188,10 @@ impl Brc20Index {
             brc20_ticker.update_transfer_sends(brc20_transfer_tx.from.clone(), brc20_transfer_tx);
 
             self.remove_active_transfer_balance(&outpoint);
+
+            // TODO: insert/update MongoDB document
+            // update userbalances in mongodb
+            // update ticker in mongodb
         }
 
         Ok(())
@@ -187,12 +218,18 @@ impl Brc20Index {
     }
 }
 
-pub fn index_brc20(
+pub async fn index_brc20(
     rpc: &Client,
     start_block_height: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Instantiate a new `Brc20Index` struct.
     let mut brc20_index = Brc20Index::new();
+
+    let connection_string = "mongodb://localhost:27017";
+    let db_name = "omnisat";
+
+    // This will return a future that you can await directly
+    let client = MongoClient::new(connection_string, db_name).await?;
 
     let mut current_block_height = start_block_height;
     loop {
@@ -226,30 +263,42 @@ pub fn index_brc20(
                                     let owner = get_owner_of_vout(&raw_tx, 0)?;
 
                                     match &inscription.op[..] {
-                                        "deploy" => handle_deploy_operation(
-                                            inscription,
-                                            raw_tx.clone(),
-                                            owner.clone(),
-                                            current_block_height,
-                                            tx_height,
-                                            &mut brc20_index,
-                                        )?,
-                                        "mint" => handle_mint_operation(
-                                            current_block_height,
-                                            tx_height,
-                                            owner,
-                                            inscription,
-                                            &raw_tx,
-                                            &mut brc20_index,
-                                        )?,
-                                        "transfer" => handle_transfer_operation(
-                                            current_block_height,
-                                            tx_height,
-                                            inscription,
-                                            raw_tx.clone(),
-                                            owner.clone(),
-                                            &mut brc20_index,
-                                        )?,
+                                        "deploy" => {
+                                            handle_deploy_operation(
+                                                &client,
+                                                inscription,
+                                                raw_tx.clone(),
+                                                owner.clone(),
+                                                current_block_height,
+                                                tx_height,
+                                                &mut brc20_index,
+                                            )
+                                            .await?
+                                        }
+                                        "mint" => {
+                                            handle_mint_operation(
+                                                &client,
+                                                current_block_height,
+                                                tx_height,
+                                                owner,
+                                                inscription,
+                                                &raw_tx,
+                                                &mut brc20_index,
+                                            )
+                                            .await?
+                                        }
+                                        "transfer" => {
+                                            handle_transfer_operation(
+                                                &client,
+                                                current_block_height,
+                                                tx_height,
+                                                inscription,
+                                                raw_tx.clone(),
+                                                owner.clone(),
+                                                &mut brc20_index,
+                                            )
+                                            .await?
+                                        }
                                         _ => {
                                             // Unexpected operation
                                             error!("Unexpected operation: {}", inscription.op);
@@ -258,7 +307,9 @@ pub fn index_brc20(
                                 } else {
                                     // No inscription found
                                     // check if the tx is sending a transfer inscription
-                                    brc20_index.check_for_transfer_send(&rpc, &raw_tx)?;
+                                    brc20_index
+                                        .check_for_transfer_send(&client, &rpc, &raw_tx)
+                                        .await?;
                                 }
                             }
                             // Increment the tx height
@@ -277,11 +328,12 @@ pub fn index_brc20(
             Err(e) => {
                 error!("Failed to fetch block hash for height: {:?}", e);
                 sleep(Duration::from_secs(60));
-            }
+            } //
+              // TODO: save to MongoDB this block height and timestamp
         }
 
         // stop after reaching a certain block height
-        if current_block_height > 795362 {
+        if current_block_height > 795490 {
             break;
         }
     }
@@ -305,4 +357,67 @@ pub fn index_brc20(
     }
 
     Ok(())
+}
+
+impl ToDocument for GetRawTransactionResult {
+    fn to_document(&self) -> Document {
+        doc! {
+            "hex": hex::encode(&self.hex),
+            "txid": self.txid.to_string(),
+            "hash": self.hash.to_string(),
+            "size": self.size as i64, // Convert to i64
+            "vsize": self.vsize as i64, // Convert to i64
+            "version": self.version,
+            "locktime": self.locktime,
+            "vin": self.vin.iter().map(|vin| vin.to_document()).collect::<Vec<Document>>(),
+            "vout": self.vout.iter().map(|vout| vout.to_document()).collect::<Vec<Document>>(),
+            "blockhash": self.blockhash.map(|blockhash| blockhash.to_string()),
+            "confirmations": self.confirmations,
+            "time": self.time.map(|time| time as i64), // Convert to i64
+            "blocktime": self.blocktime.map(|blocktime| blocktime as i64), // Convert to i64
+        }
+    }
+}
+
+impl ToDocument for GetRawTransactionResultVin {
+    fn to_document(&self) -> Document {
+        doc! {
+            "sequence": self.sequence as i64,
+            "coinbase": self.coinbase.as_ref().map(|c| hex::encode(c)),
+            "txid": self.txid.map(|txid| txid.to_string()),
+            "vout": self.vout.map(|vout| vout as i64),
+            "script_sig": self.script_sig.as_ref().map(|script_sig| {
+                doc! {
+                    "asm": &script_sig.asm,
+                    "hex": hex::encode(&script_sig.hex),
+                }
+            }),
+            "txinwitness": self.txinwitness.as_ref().map(|witness| {
+                witness.iter().map(|w| hex::encode(w)).collect::<Vec<_>>()
+            }),
+        }
+    }
+}
+
+impl ToDocument for GetRawTransactionResultVoutScriptPubKey {
+    fn to_document(&self) -> Document {
+        doc! {
+            "asm": &self.asm,
+            "hex": hex::encode(&self.hex),
+            "req_sigs": self.req_sigs.map(|req_sigs| req_sigs as i64),
+            "type": self.type_.as_ref().map(|type_| format!("{:?}", type_)),
+            "addresses": self.addresses.iter().map(|address| address.clone().assume_checked().to_string()).collect::<Vec<_>>(),
+            "address": self.address.clone().map(|address| address.assume_checked().to_string()),
+        }
+    }
+}
+
+impl ToDocument for GetRawTransactionResultVout {
+    fn to_document(&self) -> Document {
+        doc! {
+            "value": self.value.to_btc(),
+            "n": self.n as i64,
+            "script_pub_key": self.script_pub_key.to_document(),
+        }
+    }
 }

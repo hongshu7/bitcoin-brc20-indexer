@@ -1,9 +1,13 @@
+use crate::mongo::MongoClient;
+
 use super::invalid_brc20::{InvalidBrc20Tx, InvalidBrc20TxMap};
-use super::Brc20Index;
 use super::{brc20_ticker::Brc20Ticker, utils::convert_to_float, Brc20Inscription};
+use super::{Brc20Index, ToDocument};
+use crate::brc20_index::consts;
 use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use log::{error, info};
+use mongodb::bson::{doc, Document};
 use serde::Serialize;
 use std::{collections::HashMap, fmt};
 
@@ -72,11 +76,12 @@ impl Brc20Deploy {
         &self.tx
     }
 
-    pub fn validate_deploy_script(
+    pub async fn validate_deploy_script(
         mut self,
         invalid_tx_map: &mut InvalidBrc20TxMap,
         ticker_map: &HashMap<String, Brc20Ticker>,
-    ) -> Self {
+        mongo_client: &MongoClient,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let ticker_symbol = self.inscription.tick.to_lowercase();
 
         let mut reasons = vec![];
@@ -126,10 +131,15 @@ impl Brc20Deploy {
                 valid_deploy_tx.inscription.clone(),
                 reason,
             );
-            invalid_tx_map.add_invalid_tx(invalid_tx);
+            invalid_tx_map.add_invalid_tx(invalid_tx.clone());
+
+            // insert invalid deploy tx into mongodb
+            mongo_client
+                .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
+                .await?;
         }
 
-        valid_deploy_tx
+        Ok(valid_deploy_tx)
     }
 
     fn validate_ticker_symbol(
@@ -201,7 +211,24 @@ impl Brc20Deploy {
     }
 }
 
-pub fn handle_deploy_operation(
+impl ToDocument for Brc20Deploy {
+    fn to_document(&self) -> Document {
+        doc! {
+            "max": &self.max.to_string(),
+            "lim": &self.lim,
+            "dec": &self.dec.to_string(),
+            "block_height": &self.block_height,
+            "tx_height": &self.tx_height,
+            "created_by": &self.owner.to_string(),
+            "tx": &self.tx.to_document(),
+            "inscription": &self.inscription.to_document(),
+            "is_valid": &self.is_valid,
+        }
+    }
+}
+
+pub async fn handle_deploy_operation(
+    mongo_client: &MongoClient,
     inscription: Brc20Inscription,
     raw_tx: GetRawTransactionResult,
     owner: Address,
@@ -210,15 +237,44 @@ pub fn handle_deploy_operation(
     brc20_index: &mut Brc20Index,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let validated_deploy_tx = Brc20Deploy::new(raw_tx, inscription, block_height, tx_height, owner)
-        .validate_deploy_script(&mut brc20_index.invalid_tx_map, &brc20_index.tickers);
+        .validate_deploy_script(
+            &mut brc20_index.invalid_tx_map,
+            &brc20_index.tickers,
+            &mongo_client,
+        )
+        .await?;
 
     if validated_deploy_tx.is_valid() {
         info!("Deploy: {:?}", validated_deploy_tx.get_deploy_script());
 
         // Instantiate a new `Brc20Ticker` struct and update the hashmap with the deploy information.
-        let ticker = Brc20Ticker::new(validated_deploy_tx);
-        brc20_index.tickers.insert(ticker.get_ticker(), ticker);
+        let ticker = Brc20Ticker::new(validated_deploy_tx.clone());
+        brc20_index
+            .tickers
+            .insert(ticker.get_ticker(), ticker.clone());
+
+        // Insert ticker into MongoDB
+        mongo_client
+            .insert_document(consts::COLLECTION_TICKERS, ticker.to_document())
+            .await?;
+    } else {
+        // Insert the invalid deploy transaction into MongoDB
+        mongo_client
+            .insert_document(
+                consts::COLLECTION_INVALIDS,
+                validated_deploy_tx.to_document(),
+            )
+            .await?;
     }
+
+    // Insert the deploy transaction into MongoDB
+    mongo_client
+        .insert_document(
+            consts::COLLECTION_DEPLOYS,
+            validated_deploy_tx.to_document(),
+        )
+        .await?;
+
     Ok(())
 }
 

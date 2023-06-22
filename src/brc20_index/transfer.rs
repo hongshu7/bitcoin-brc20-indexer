@@ -1,7 +1,10 @@
-use super::{invalid_brc20::InvalidBrc20Tx, Brc20Index, Brc20Inscription};
+use crate::{brc20_index::ToDocument, mongo::MongoClient};
+
+use super::{consts, invalid_brc20::InvalidBrc20Tx, Brc20Index, Brc20Inscription};
 use bitcoin::{Address, OutPoint};
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use log::{error, info};
+use mongodb::bson::{doc, Document};
 use serde::Serialize;
 use std::fmt;
 
@@ -72,7 +75,11 @@ impl Brc20Transfer {
         self.is_valid
     }
 
-    pub fn handle_inscribe_transfer(&mut self, index: &mut Brc20Index) {
+    pub async fn handle_inscribe_transfer(
+        &mut self,
+        index: &mut Brc20Index,
+        mongo_client: &MongoClient,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let from = &self.from;
         let ticker_symbol = &self.inscription.tick;
 
@@ -84,9 +91,12 @@ impl Brc20Transfer {
                 index.invalid_tx_map.add_invalid_tx(InvalidBrc20Tx::new(
                     self.tx.txid,
                     self.inscription.clone(),
-                    reason,
+                    reason.clone(),
                 ));
-                return;
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    reason,
+                )));
             }
         };
 
@@ -98,9 +108,12 @@ impl Brc20Transfer {
                 index.invalid_tx_map.add_invalid_tx(InvalidBrc20Tx::new(
                     self.tx.txid,
                     self.inscription.clone(),
-                    reason,
+                    reason.clone(),
                 ));
-                return;
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    reason,
+                )));
             }
         };
 
@@ -120,12 +133,16 @@ impl Brc20Transfer {
         } else {
             let reason = "Transfer amount exceeds available balance".to_string();
             error!("INVALID: {}", reason);
-            index.invalid_tx_map.add_invalid_tx(InvalidBrc20Tx::new(
-                self.tx.txid,
-                self.inscription.clone(),
-                reason,
-            ));
+            let invalid_tx = InvalidBrc20Tx::new(self.tx.txid, self.inscription.clone(), reason);
+            index.invalid_tx_map.add_invalid_tx(invalid_tx.clone());
+
+            // Insert the invalid deploy transaction into MongoDB
+            mongo_client
+                .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
+                .await?;
         }
+
+        Ok(())
     }
 
     pub fn set_receiver(mut self, receiver: Address) -> Self {
@@ -146,7 +163,8 @@ impl fmt::Display for Brc20Transfer {
     }
 }
 
-pub fn handle_transfer_operation(
+pub async fn handle_transfer_operation(
+    mongo_client: &MongoClient,
     block_height: u32,
     tx_height: u32,
     inscription: Brc20Inscription,
@@ -154,19 +172,51 @@ pub fn handle_transfer_operation(
     sender: Address,
     brc20_index: &mut Brc20Index,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut brc20_transfer_tx =
+    let mut validated_transfer_tx =
         Brc20Transfer::new(raw_tx, inscription, block_height, tx_height, sender);
 
-    brc20_transfer_tx.handle_inscribe_transfer(brc20_index);
+    validated_transfer_tx.handle_inscribe_transfer(brc20_index, mongo_client);
 
     brc20_index.update_active_transfer_inscription(
-        brc20_transfer_tx.get_inscription_outpoint(),
-        brc20_transfer_tx.get_transfer_script().tick.clone(),
+        validated_transfer_tx.get_inscription_outpoint(),
+        validated_transfer_tx.get_transfer_script().tick.clone(),
     );
 
-    if brc20_transfer_tx.is_valid() {
-        info!("Transfer: {:?}", brc20_transfer_tx.get_transfer_script());
-        info!("Sender Address: {:?}", brc20_transfer_tx.from);
+    if validated_transfer_tx.is_valid() {
+        info!(
+            "Transfer: {:?}",
+            validated_transfer_tx.get_transfer_script()
+        );
+        info!("From Address: {:?}", validated_transfer_tx.from);
     }
+
+    // Add the mint transaction to the mongo database
+    mongo_client
+        .insert_document(
+            consts::COLLECTION_TRANSFERS,
+            validated_transfer_tx.to_document(),
+        )
+        .await?;
+
+    // TODO: update user balance in mongo and ticker
+
     Ok(())
+}
+
+impl ToDocument for Brc20Transfer {
+    fn to_document(&self) -> Document {
+        doc! {
+            // "_id": self.id.clone(),
+            // "ticker_id": self.ticker_id.clone(),
+            "amt": self.amt,
+            "block_height": self.block_height,
+            "tx_height": self.tx_height,
+            "tx": self.tx.to_document(), // Convert GetRawTransactionResult to document
+            "inscription": self.inscription.to_document(),
+            "send_tx": self.send_tx.clone().map(|tx| tx.to_document()), // Convert Option<GetRawTransactionResult> to document
+            "to": self.to.clone().map(|addr| addr.to_string()), // Convert Option<Address> to string
+            "is_valid": self.is_valid,
+            // "created_at": self.created_at.clone(),
+        }
+    }
 }
