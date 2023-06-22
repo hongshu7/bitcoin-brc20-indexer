@@ -6,7 +6,7 @@ use super::{
 };
 use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
-use log::info;
+use log::{error, info};
 use serde::Serialize;
 use std::{collections::HashMap, fmt};
 
@@ -59,9 +59,6 @@ impl Brc20Mint {
     ) -> Brc20Mint {
         let mut is_valid = true;
         let mut reason = String::new();
-        // instantiate new Brc20Mint
-        // let mut brc20_mint_tx: Brc20Mint =
-        //     Brc20Mint::new(tx, self.inscription, block_height, tx_height);
 
         if let Some(ticker) = ticker_map.get(&self.inscription.tick) {
             let limit = ticker.get_limit();
@@ -78,8 +75,14 @@ impl Brc20Mint {
                     if amount > limit {
                         is_valid = false;
                         reason = "Mint amount exceeds limit".to_string();
+                        error!("Mint amount exceeds limit");
+                    // Check if total minted is already greater than or equal to max supply
+                    } else if total_minted >= max_supply {
+                        is_valid = false;
+                        reason = "Total minted is already at or exceeds max supply".to_string();
+                        error!("Total minted is already at max supply");
+                    // Check if the total minted amount + requested mint amount exceeds the max supply
                     } else if total_minted + amount > max_supply {
-                        // Check if the total minted amount + requested mint amount exceeds the max supply
                         // Adjust the mint amount to mint the remaining tokens
                         let remaining_amount = max_supply - total_minted;
                         self.amt = remaining_amount;
@@ -95,6 +98,7 @@ impl Brc20Mint {
         } else {
             is_valid = false;
             reason = "Ticker symbol does not exist".to_string();
+            error!("Ticker symbol does not exist");
         }
 
         if !is_valid {
@@ -136,7 +140,7 @@ pub fn handle_mint_operation(
     // Check if the mint operation is valid.
     if validated_mint_tx.is_valid() {
         info!("Mint: {:?}", validated_mint_tx.get_mint());
-        info!("Owner Address: {:?}", validated_mint_tx.to);
+        info!("TO Address: {:?}", validated_mint_tx.to);
     }
     Ok(())
 }
