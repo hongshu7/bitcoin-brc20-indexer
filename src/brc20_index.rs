@@ -119,15 +119,24 @@ impl Brc20Index {
                     }
                 };
 
-            let proper_vout = if input_index == 0 {
-                0
-            } else {
-                // get values of all inputs only when necessary
+            // If the input is the first input, the proper vout is 0.
+            // For other inputs, calculate the proper vout by
+            // finding the vout that is greater than the sum of all input values
+            // of the inputs leading up to but not including the current one.
+            let proper_vout = if input_index > 0 {
+                // if not in first input, get values of all inputs only up to this input
                 let input_values =
                     utils::transaction_inputs_to_values(rpc, &transaction.input[0..input_index])?;
 
+                // then get the sum these input values
                 let input_value_sum: u64 = input_values.iter().sum();
-                let proper_vout = transaction
+
+                // Calculate the index of the output (vout) which is the recipient of the
+                // current input by finding the first output whose value is greater than
+                // or equal to the sum of all preceding input values. This is based on the
+                // assumption that inputs and outputs are processed in order and each input's
+                // value goes to the next output that it fully covers.
+                transaction
                     .output
                     .iter()
                     .scan(0, |acc, output| {
@@ -135,9 +144,9 @@ impl Brc20Index {
                         Some(*acc)
                     })
                     .position(|value| value >= input_value_sum)
-                    .unwrap_or_else(|| transaction.output.len() - 1);
-
-                proper_vout
+                    .unwrap_or_else(|| transaction.output.len() - 1)
+            } else {
+                0
             };
 
             let receiver_address = get_owner_of_vout(&raw_tx_info, proper_vout)?;
