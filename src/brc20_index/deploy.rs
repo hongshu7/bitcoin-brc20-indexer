@@ -83,26 +83,38 @@ impl Brc20Deploy {
 
         match self.validate_ticker_symbol(&ticker_symbol, ticker_map) {
             Ok(_) => {}
-            Err(reason) => reasons.push(reason),
+            Err(reason) => {
+                error!("INVALID: {}", reason);
+                reasons.push(reason)
+            }
         }
 
         match self.validate_decimals_field() {
             Ok(_) => {}
-            Err(reason) => reasons.push(reason),
+            Err(reason) => {
+                error!("INVALID: {}", reason);
+                reasons.push(reason)
+            }
         }
 
         match self.validate_max_field() {
             Ok(max) => {
                 self.max = max;
             }
-            Err(reason) => reasons.push(reason),
+            Err(reason) => {
+                error!("INVALID: {}", reason);
+                reasons.push(reason)
+            }
         }
 
         match self.validate_limit_field(self.max) {
             Ok(limit) => {
                 self.lim = limit;
             }
-            Err(reason) => reasons.push(reason),
+            Err(reason) => {
+                error!("INVALID: {}", reason);
+                reasons.push(reason)
+            }
         }
 
         let valid_deploy_tx = self.set_valid(reasons.is_empty());
@@ -126,10 +138,8 @@ impl Brc20Deploy {
         ticker_map: &HashMap<String, Brc20Ticker>,
     ) -> Result<(), String> {
         if ticker_map.contains_key(ticker_symbol) {
-            error!("Ticker symbol already exists");
             Err("Ticker symbol already exists".to_string())
         } else if self.inscription.tick.chars().count() != 4 {
-            error!("Ticker symbol must be 4 characters long");
             Err("Ticker symbol must be 4 characters long".to_string())
         } else {
             Ok(())
@@ -141,13 +151,11 @@ impl Brc20Deploy {
             let parsed_decimals = match decimals.parse::<u8>() {
                 Ok(value) => value,
                 Err(_) => {
-                    error!("Decimals field must be a valid unsigned integer");
                     return Err("Decimals field must be a valid unsigned integer".to_string());
                 }
             };
 
             if parsed_decimals > 18 {
-                error!("Decimals must be 18 or less");
                 return Err("Decimals must be 18 or less".to_string());
             }
 
@@ -164,7 +172,6 @@ impl Brc20Deploy {
                     if max > 0.0 && decimal_places(max) <= self.dec.into() {
                         Ok(max)
                     } else {
-                        error!("Max supply must be greater than 0 and the number of decimal places must not exceed the decimal value.");
                         Err("Max supply must be greater than 0 and the number of decimal places must not exceed the decimal value.".to_string())
                     }
                 }
@@ -184,7 +191,6 @@ impl Brc20Deploy {
                     if limit <= max && decimal_places(limit) <= self.dec.into() {
                         Ok(limit)
                     } else {
-                        error!("Limit must be less than or equal to max supply and the number of decimal places must not exceed the decimal value.");
                         Err("Limit must be less than or equal to max supply and the number of decimal places must not exceed the decimal value.".to_string())
                     }
                 }

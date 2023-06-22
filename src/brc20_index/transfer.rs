@@ -1,7 +1,7 @@
 use super::{invalid_brc20::InvalidBrc20Tx, Brc20Index, Brc20Inscription};
 use bitcoin::{Address, OutPoint};
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
-use log::info;
+use log::{error, info};
 use serde::Serialize;
 use std::fmt;
 
@@ -72,43 +72,59 @@ impl Brc20Transfer {
         self.is_valid
     }
 
-    pub fn handle_inscribe_transfer_amount(&mut self, index: &mut Brc20Index) {
-        let owner = &self.from;
+    pub fn handle_inscribe_transfer(&mut self, index: &mut Brc20Index) {
+        let from = &self.from;
         let ticker_symbol = &self.inscription.tick;
 
-        if let Some(ticker) = index.get_ticker_mut(ticker_symbol) {
-            if let Some(user_balance) = ticker.get_user_balance_mut(&owner) {
-                let transfer_amount = self
-                    .inscription
-                    .amt
-                    .as_ref()
-                    .map(|amt_str| amt_str.parse::<f64>().unwrap_or(0.0))
-                    .unwrap_or(0.0);
-
-                let available_balance = user_balance.get_available_balance();
-
-                if available_balance >= transfer_amount {
-                    self.is_valid = true;
-                    println!("VALID: Transfer inscription added. Owner: {:#?}", owner);
-
-                    // Increase the transferable balance of the sender
-                    user_balance.add_transfer_inscription(self.clone());
-                } else {
-                    let reason = "Transfer amount exceeds available balance".to_string();
-                    let invalid_tx =
-                        InvalidBrc20Tx::new(self.tx.txid, self.inscription.clone(), reason);
-                    index.invalid_tx_map.add_invalid_tx(invalid_tx);
-                }
-            } else {
-                let reason = "User balance not found".to_string();
-                let invalid_tx =
-                    InvalidBrc20Tx::new(self.tx.txid, self.inscription.clone(), reason);
-                index.invalid_tx_map.add_invalid_tx(invalid_tx);
+        let ticker = match index.get_ticker_mut(ticker_symbol) {
+            Some(ticker) => ticker,
+            None => {
+                let reason = "Ticker not found".to_string();
+                error!("INVALID: {}", reason);
+                index.invalid_tx_map.add_invalid_tx(InvalidBrc20Tx::new(
+                    self.tx.txid,
+                    self.inscription.clone(),
+                    reason,
+                ));
+                return;
             }
+        };
+
+        let user_balance = match ticker.get_user_balance_mut(&from) {
+            Some(balance) => balance,
+            None => {
+                let reason = "User balance not found".to_string();
+                error!("INVALID: {}", reason);
+                index.invalid_tx_map.add_invalid_tx(InvalidBrc20Tx::new(
+                    self.tx.txid,
+                    self.inscription.clone(),
+                    reason,
+                ));
+                return;
+            }
+        };
+
+        let transfer_amount = self
+            .inscription
+            .amt
+            .as_ref()
+            .map(|amt_str| amt_str.parse::<f64>().unwrap_or(0.0))
+            .unwrap_or(0.0);
+
+        if user_balance.get_available_balance() >= transfer_amount {
+            self.is_valid = true;
+            println!("VALID: Transfer inscription added. From: {:#?}", from);
+
+            // Increase the transferable balance of the sender
+            user_balance.add_transfer_inscription(self.clone());
         } else {
-            let reason = "Ticker not found".to_string();
-            let invalid_tx = InvalidBrc20Tx::new(self.tx.txid, self.inscription.clone(), reason);
-            index.invalid_tx_map.add_invalid_tx(invalid_tx);
+            let reason = "Transfer amount exceeds available balance".to_string();
+            error!("INVALID: {}", reason);
+            index.invalid_tx_map.add_invalid_tx(InvalidBrc20Tx::new(
+                self.tx.txid,
+                self.inscription.clone(),
+                reason,
+            ));
         }
     }
 
@@ -141,7 +157,7 @@ pub fn handle_transfer_operation(
     let mut brc20_transfer_tx =
         Brc20Transfer::new(raw_tx, inscription, block_height, tx_height, sender);
 
-    brc20_transfer_tx.handle_inscribe_transfer_amount(brc20_index);
+    brc20_transfer_tx.handle_inscribe_transfer(brc20_index);
 
     brc20_index.update_active_transfer_inscription(
         brc20_transfer_tx.get_inscription_outpoint(),

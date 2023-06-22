@@ -75,12 +75,10 @@ impl Brc20Mint {
                     if amount > limit {
                         is_valid = false;
                         reason = "Mint amount exceeds limit".to_string();
-                        error!("Mint amount exceeds limit");
                     // Check if total minted is already greater than or equal to max supply
                     } else if total_minted >= max_supply {
                         is_valid = false;
                         reason = "Total minted is already at or exceeds max supply".to_string();
-                        error!("Total minted is already at max supply");
                     // Check if the total minted amount + requested mint amount exceeds the max supply
                     } else if total_minted + amount > max_supply {
                         // Adjust the mint amount to mint the remaining tokens
@@ -98,10 +96,10 @@ impl Brc20Mint {
         } else {
             is_valid = false;
             reason = "Ticker symbol does not exist".to_string();
-            error!("Ticker symbol does not exist");
         }
 
         if !is_valid {
+            error!("INVALID: {}", reason);
             let invalid_tx = InvalidBrc20Tx::new(self.tx.txid, self.inscription.clone(), reason);
             invalid_tx_map.add_invalid_tx(invalid_tx);
         } else {
