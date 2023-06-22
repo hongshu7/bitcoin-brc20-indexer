@@ -110,6 +110,7 @@ pub fn convert_to_float(number_string: &str, decimals: u8) -> Result<f64, &'stat
         2 => {
             // There is a decimal point in the string
             if parts[1].len() > decimals as usize {
+                error!("There are too many digits to the right of the decimal");
                 return Err("There are too many digits to the right of the decimal");
             } else {
                 let result = number_string.parse::<f64>();

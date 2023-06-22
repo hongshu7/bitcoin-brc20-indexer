@@ -3,7 +3,7 @@ use super::Brc20Index;
 use super::{brc20_ticker::Brc20Ticker, utils::convert_to_float, Brc20Inscription};
 use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
-use log::info;
+use log::{error, info};
 use serde::Serialize;
 use std::{collections::HashMap, fmt};
 
@@ -126,8 +126,10 @@ impl Brc20Deploy {
         ticker_map: &HashMap<String, Brc20Ticker>,
     ) -> Result<(), String> {
         if ticker_map.contains_key(ticker_symbol) {
+            error!("Ticker symbol already exists");
             Err("Ticker symbol already exists".to_string())
         } else if self.inscription.tick.chars().count() != 4 {
+            error!("Ticker symbol must be 4 characters long");
             Err("Ticker symbol must be 4 characters long".to_string())
         } else {
             Ok(())
@@ -138,10 +140,14 @@ impl Brc20Deploy {
         if let Some(decimals) = &self.inscription.dec {
             let parsed_decimals = match decimals.parse::<u8>() {
                 Ok(value) => value,
-                Err(_) => return Err("Decimals field must be a valid unsigned integer".to_string()),
+                Err(_) => {
+                    error!("Decimals field must be a valid unsigned integer");
+                    return Err("Decimals field must be a valid unsigned integer".to_string());
+                }
             };
 
             if parsed_decimals > 18 {
+                error!("Decimals must be 18 or less");
                 return Err("Decimals must be 18 or less".to_string());
             }
 
@@ -158,12 +164,16 @@ impl Brc20Deploy {
                     if max > 0.0 && decimal_places(max) <= self.dec.into() {
                         Ok(max)
                     } else {
+                        error!("Max supply must be greater than 0 and the number of decimal places must not exceed the decimal value.");
                         Err("Max supply must be greater than 0 and the number of decimal places must not exceed the decimal value.".to_string())
                     }
                 }
                 Err(_) => Err("Max field must be a valid number.".to_string()),
             },
-            None => Err("Max field is missing.".to_string()),
+            None => {
+                error!("Max field is missing.");
+                Err("Max field is missing.".to_string())
+            }
         }
     }
 
@@ -174,6 +184,7 @@ impl Brc20Deploy {
                     if limit <= max && decimal_places(limit) <= self.dec.into() {
                         Ok(limit)
                     } else {
+                        error!("Limit must be less than or equal to max supply and the number of decimal places must not exceed the decimal value.");
                         Err("Limit must be less than or equal to max supply and the number of decimal places must not exceed the decimal value.".to_string())
                     }
                 }
