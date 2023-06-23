@@ -82,7 +82,7 @@ impl Brc20Transfer {
         mongo_client: &MongoClient,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let from = &self.from;
-        let ticker_symbol = &self.inscription.tick;
+        let ticker_symbol = &self.inscription.tick.to_lowercase();
 
         let ticker = match index.get_ticker_mut(ticker_symbol) {
             Some(ticker) => ticker,
@@ -197,7 +197,11 @@ pub async fn handle_transfer_operation(
 
     brc20_index.update_active_transfer_inscription(
         validated_transfer_tx.get_inscription_outpoint(),
-        validated_transfer_tx.get_transfer_script().tick.clone(),
+        validated_transfer_tx
+            .get_transfer_script()
+            .tick
+            .to_lowercase()
+            .clone(),
     );
 
     if validated_transfer_tx.is_valid() {

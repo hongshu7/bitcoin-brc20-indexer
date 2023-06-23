@@ -21,7 +21,7 @@ impl ToDocument for UserBalance {
     fn to_document(&self) -> Document {
         doc! {
             "address": self.address.to_string(),
-            "tick": self.tick.clone(),
+            "tick": self.tick.to_lowercase().clone(),
             "overall_balance": self.overall_balance,
             "available_balance": self.available_balance,
             "transferable_balance": self.transferable_balance,

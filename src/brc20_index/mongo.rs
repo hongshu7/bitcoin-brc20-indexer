@@ -166,74 +166,6 @@ impl MongoClient {
         Ok(result)
     }
 
-    pub async fn update_receiver_balance_document(
-        &self,
-        receiver_address: &String,
-        amount: f64,
-        tick: &str,
-    ) -> Result<(), anyhow::Error> {
-        let filter = doc! {
-          "address": receiver_address,
-          "tick": tick
-        };
-
-        // retrieve the user balance for the receiver from MongoDB
-        let user_balance_to = self
-            .get_user_balance_document(consts::COLLECTION_USER_BALANCES, filter.clone())
-            .await?;
-
-        match user_balance_to {
-            Some(mut user_balance_doc) => {
-                if let Some(overall_balance) = user_balance_doc.get(consts::OVERALL_BALANCE) {
-                    if let Bson::Double(val) = overall_balance {
-                        user_balance_doc
-                            .insert(consts::OVERALL_BALANCE, Bson::Double(val + amount));
-                    }
-                }
-
-                if let Some(available_balance) = user_balance_doc.get(consts::AVAILABLE_BALANCE) {
-                    if let Bson::Double(val) = available_balance {
-                        user_balance_doc
-                            .insert(consts::AVAILABLE_BALANCE, Bson::Double(val + amount));
-                    }
-                }
-
-                // create an update document using $set operator
-
-                println!("debug #4");
-                let update_doc = doc! {
-                    "$set": {
-                        consts::OVERALL_BALANCE: user_balance_doc.get(consts::OVERALL_BALANCE).unwrap_or_else(|| &Bson::Double(0.0)),
-                        consts::AVAILABLE_BALANCE: user_balance_doc.get(consts::AVAILABLE_BALANCE).unwrap_or_else(|| &Bson::Double(0.0)),
-                    }
-                };
-
-                // Update the document in MongoDB
-                self.update_document_by_filter(
-                    consts::COLLECTION_USER_BALANCES,
-                    filter,
-                    update_doc,
-                )
-                .await?;
-            }
-            None => {
-                // Create a new UserBalance
-                let mut user_balance = UserBalance::new(receiver_address.clone(), tick.to_string());
-                user_balance.overall_balance = amount;
-                user_balance.available_balance = amount;
-
-                // Insert the new document into the MongoDB collection
-                self.insert_new_document(
-                    consts::COLLECTION_USER_BALANCES,
-                    user_balance.to_document(),
-                )
-                .await?;
-            }
-        }
-
-        Ok(())
-    }
-
     pub async fn insert_new_document(
         &self,
         collection_name: &str,
@@ -313,12 +245,14 @@ impl MongoClient {
         ticker: &str,
         amount_to_add: f64,
     ) -> Result<(), mongodb::error::Error> {
-        let db = self.client.database(&self.db_name);
+        let db = self.client.database("omnisat");
         let collection = db.collection::<bson::Document>(consts::COLLECTION_TICKERS);
 
         // Retrieve the brc20ticker document
-        let filter = doc! { "ticker": ticker };
+        let filter = doc! { "tick": ticker };
         let ticker_doc = collection.find_one(filter.clone(), None).await?;
+
+        println!("ticker_doc: {:?}", ticker_doc);
 
         match ticker_doc {
             Some(mut ticker) => {
@@ -334,13 +268,87 @@ impl MongoClient {
                     }
                 };
 
+                // // Update the document in MongoDB
+                // self.update_document_by_filter(consts::COLLECTION_TICKERS, filter, update_doc)
+                //     .await?;
+
                 // Update the document in the collection
                 let update_options = UpdateOptions::builder().upsert(false).build();
                 collection
                     .update_one(filter, update_doc, update_options)
                     .await?;
             }
-            None => {}
+            None => {
+                println!("No ticker document found for ticker {}", ticker);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn update_receiver_balance_document(
+        &self,
+        receiver_address: &String,
+        amount: f64,
+        tick: &str,
+    ) -> Result<(), anyhow::Error> {
+        let filter = doc! {
+          "address": receiver_address,
+          "tick": tick
+        };
+
+        // retrieve the user balance for the receiver from MongoDB
+        let user_balance_to = self
+            .get_user_balance_document(consts::COLLECTION_USER_BALANCES, filter.clone())
+            .await?;
+
+        match user_balance_to {
+            Some(mut user_balance_doc) => {
+                if let Some(overall_balance) = user_balance_doc.get(consts::OVERALL_BALANCE) {
+                    if let Bson::Double(val) = overall_balance {
+                        user_balance_doc
+                            .insert(consts::OVERALL_BALANCE, Bson::Double(val + amount));
+                    }
+                }
+
+                if let Some(available_balance) = user_balance_doc.get(consts::AVAILABLE_BALANCE) {
+                    if let Bson::Double(val) = available_balance {
+                        user_balance_doc
+                            .insert(consts::AVAILABLE_BALANCE, Bson::Double(val + amount));
+                    }
+                }
+
+                // create an update document using $set operator
+
+                println!("debug #4");
+                let update_doc = doc! {
+                    "$set": {
+                        consts::OVERALL_BALANCE: user_balance_doc.get(consts::OVERALL_BALANCE).unwrap_or_else(|| &Bson::Double(0.0)),
+                        consts::AVAILABLE_BALANCE: user_balance_doc.get(consts::AVAILABLE_BALANCE).unwrap_or_else(|| &Bson::Double(0.0)),
+                    }
+                };
+
+                // Update the document in MongoDB
+                self.update_document_by_filter(
+                    consts::COLLECTION_USER_BALANCES,
+                    filter,
+                    update_doc,
+                )
+                .await?;
+            }
+            None => {
+                // Create a new UserBalance
+                let mut user_balance = UserBalance::new(receiver_address.clone(), tick.to_string());
+                user_balance.overall_balance = amount;
+                user_balance.available_balance = amount;
+
+                // Insert the new document into the MongoDB collection
+                self.insert_new_document(
+                    consts::COLLECTION_USER_BALANCES,
+                    user_balance.to_document(),
+                )
+                .await?;
+            }
         }
 
         Ok(())

@@ -79,7 +79,7 @@ impl Brc20Mint {
         let mut is_valid = true;
         let mut reason = String::new();
 
-        if let Some(ticker) = ticker_map.get(&self.inscription.tick) {
+        if let Some(ticker) = ticker_map.get(&self.inscription.tick.to_lowercase()) {
             let limit = ticker.get_limit();
             let max_supply = ticker.get_max_supply();
             let total_minted = ticker.get_total_supply();
@@ -129,7 +129,9 @@ impl Brc20Mint {
         } else {
             // Set is_valid to true when the transaction is valid
             self.is_valid = is_valid;
-            let ticker = ticker_map.get_mut(&self.inscription.tick).unwrap();
+            let ticker = ticker_map
+                .get_mut(&self.inscription.tick.to_lowercase())
+                .unwrap();
             ticker.add_mint(self.clone(), mongo_client).await;
         }
 
@@ -179,7 +181,7 @@ pub async fn handle_mint_operation(
             .get_document_by_field(
                 consts::COLLECTION_TICKERS,
                 "tick",
-                &validated_mint_tx.inscription.tick,
+                &validated_mint_tx.inscription.tick.to_lowercase(),
             )
             .await?;
 
@@ -188,7 +190,7 @@ pub async fn handle_mint_operation(
             // get ticker from ticker map
             let ticker_from_map = brc20_index
                 .tickers
-                .get(&validated_mint_tx.inscription.tick)
+                .get(&validated_mint_tx.inscription.tick.to_lowercase())
                 .unwrap();
 
             if let Some(total_minted) = ticker_doc.get("total_minted") {

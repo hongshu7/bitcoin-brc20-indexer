@@ -24,7 +24,7 @@ impl ToDocument for Brc20Ticker {
     fn to_document(&self) -> Document {
         doc! {
             // "_id": self.id.clone(),
-            "tick": self.tick.clone(),
+            "tick": self.get_ticker().clone(),
             "limit": self.limit,
             "max_supply": self.max_supply,
             "decimals": self.decimals as i64,
@@ -36,7 +36,7 @@ impl ToDocument for Brc20Ticker {
 
 impl Brc20Ticker {
     pub fn new(deploy: Brc20Deploy) -> Brc20Ticker {
-        let tick = deploy.get_deploy_script().tick.clone();
+        let tick = deploy.get_deploy_script().tick.to_lowercase().clone();
         let limit = deploy.get_limit();
         let max_supply = deploy.get_max_supply();
         let decimals = deploy.get_decimals();
@@ -82,7 +82,8 @@ impl Brc20Ticker {
         if let Some(user_balance) = self.balances.get_mut(&from) {
             user_balance.add_transfer_send(tx.clone());
         } else {
-            let mut new_user_balance = UserBalance::new(from.to_string(), self.tick.clone());
+            let mut new_user_balance =
+                UserBalance::new(from.to_string(), self.get_ticker().clone());
             new_user_balance.add_transfer_send(tx.clone());
             self.balances.insert(from.clone(), new_user_balance);
         }
@@ -105,7 +106,7 @@ impl Brc20Ticker {
         if let Some(user_balance) = self.balances.get_mut(&to) {
             user_balance.add_transfer_receive(tx.clone());
         } else {
-            let mut new_user_balance = UserBalance::new(to.to_string(), self.tick.clone());
+            let mut new_user_balance = UserBalance::new(to.to_string(), self.get_ticker().clone());
             new_user_balance.add_transfer_receive(tx.clone());
             self.balances.insert(to.clone(), new_user_balance);
         }
@@ -135,11 +136,15 @@ impl Brc20Ticker {
             // TODO: Verify user balance exists in momgodb else panic
             // Update user overall balance and available for the receiver in MongoDB
             mongo_client
-                .update_receiver_balance_document(&owner.to_string(), mint_amount, &self.tick)
+                .update_receiver_balance_document(
+                    &owner.to_string(),
+                    mint_amount,
+                    &self.get_ticker(),
+                )
                 .await
                 .unwrap();
         } else {
-            let mut user_balance = UserBalance::new(mint.to.to_string(), self.tick.clone());
+            let mut user_balance = UserBalance::new(mint.to.to_string(), self.get_ticker().clone());
             user_balance.add_mint_tx(mint.clone());
             self.balances.insert(owner.clone(), user_balance.clone());
 
@@ -162,14 +167,14 @@ impl Brc20Ticker {
           );
             log::info!(
                 "Total minted tokens for ticker {}:  {}",
-                self.tick,
+                self.get_ticker(),
                 self.get_total_supply()
             );
         }
 
         // Update total minted tokens for this ticker in MongoDB
         mongo_client
-            .update_brc20_ticker_total_minted(&self.tick, mint_amount)
+            .update_brc20_ticker_total_minted(&self.get_ticker(), mint_amount)
             .await
             .unwrap();
     }

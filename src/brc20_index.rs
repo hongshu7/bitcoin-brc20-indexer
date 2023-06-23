@@ -51,7 +51,7 @@ impl ToDocument for Brc20Inscription {
         doc! {
             "p": &self.p,
             "op": &self.op,
-            "tick": &self.tick,
+            "tick": &self.tick.to_lowercase(),
             "amt": &self.amt,
             "max": &self.max,
             "lim": &self.lim,
@@ -179,7 +179,7 @@ impl Brc20Index {
             let amount = brc20_transfer_tx.get_amount();
             let from = brc20_transfer_tx.from.clone();
 
-            let ticker_symbol = &brc20_ticker.tick.clone();
+            let ticker_symbol = &brc20_ticker.get_ticker().clone();
 
             // // Fetch existing balances for sender and receiver
             // let sender_balance_doc = mongo_client
