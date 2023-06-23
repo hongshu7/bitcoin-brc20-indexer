@@ -168,51 +168,53 @@ pub async fn handle_mint_operation(
     if validated_mint_tx.is_valid() {
         info!("Mint: {:?}", validated_mint_tx.get_mint());
         info!("TO Address: {:?}", validated_mint_tx.to);
-    }
 
-    // Add the mint transaction to the mongo database
-    mongo_client
-        .insert_document(consts::COLLECTION_MINTS, validated_mint_tx.to_document())
-        .await?;
-
-    // retrieve ticker struct from mongodb
-    let ticker_doc_from_mongo = mongo_client
-        .get_document_by_field(
-            consts::COLLECTION_TICKERS,
-            "tick",
-            &validated_mint_tx.inscription.tick,
-        )
-        .await?;
-
-    let amount = validated_mint_tx.get_amount();
-    if let Some(mut ticker_doc) = ticker_doc_from_mongo {
-        // get ticker from ticker map
-        let ticker_from_map = brc20_index
-            .tickers
-            .get(&validated_mint_tx.inscription.tick)
-            .unwrap();
-
-        if let Some(total_minted) = ticker_doc.get("total_minted") {
-            if let Bson::Double(val) = total_minted {
-                ticker_doc.insert("total_minted", Bson::Double(val + amount));
-            }
-        }
-        println!("debug #1");
-        let update_doc = doc! {
-            "$set": {
-                consts::OVERALL_BALANCE: ticker_doc.get("total_minted").unwrap_or_else(|| &Bson::Double(0.0)),
-            }
-        };
-
-        // update ticker struct in mongodb
+        // Add the mint transaction to the mongo database
         mongo_client
-            .update_document_by_field(
+            .insert_document(consts::COLLECTION_MINTS, validated_mint_tx.to_document())
+            .await?;
+
+        // retrieve ticker struct from mongodb
+        let ticker_doc_from_mongo = mongo_client
+            .get_document_by_field(
                 consts::COLLECTION_TICKERS,
-                "total_minted",
-                &ticker_from_map.get_total_supply().to_string(),
-                update_doc,
+                "tick",
+                &validated_mint_tx.inscription.tick,
             )
             .await?;
+
+        let amount = validated_mint_tx.get_amount();
+        if let Some(mut ticker_doc) = ticker_doc_from_mongo {
+            // get ticker from ticker map
+            let ticker_from_map = brc20_index
+                .tickers
+                .get(&validated_mint_tx.inscription.tick)
+                .unwrap();
+
+            if let Some(total_minted) = ticker_doc.get("total_minted") {
+                if let Bson::Double(val) = total_minted {
+                    ticker_doc.insert("total_minted", Bson::Double(val + amount));
+                }
+            }
+            println!("debug #1");
+            let update_doc = doc! {
+                "$set": {
+                    "total_minted": ticker_doc.get("total_minted").unwrap_or_else(|| &Bson::Double(0.0)),
+                }
+            };
+
+            // update ticker struct in mongodb
+            mongo_client
+                .update_document_by_field(
+                    consts::COLLECTION_TICKERS,
+                    "total_minted",
+                    &ticker_from_map.get_total_supply().to_string(),
+                    update_doc,
+                )
+                .await?;
+        } else {
+            error!("Ticker not found in MongoDB");
+        }
     }
 
     Ok(())
