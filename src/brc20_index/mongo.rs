@@ -328,10 +328,16 @@ impl MongoClient {
                     }
                 }
 
+                let update_doc = doc! {
+                    "$set": {
+                        "total_minted": ticker.get("total_minted").unwrap_or_else(|| &Bson::Double(0.0)),
+                    }
+                };
+
                 // Update the document in the collection
                 let update_options = UpdateOptions::builder().upsert(false).build();
                 collection
-                    .update_one(filter, ticker, update_options)
+                    .update_one(filter, update_doc, update_options)
                     .await?;
             }
             None => {}
