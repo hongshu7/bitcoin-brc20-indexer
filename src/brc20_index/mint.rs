@@ -1,16 +1,15 @@
-use crate::mongo::MongoClient;
-
 use super::{
     brc20_ticker::Brc20Ticker,
     consts,
     invalid_brc20::{InvalidBrc20Tx, InvalidBrc20TxMap},
+    mongo::MongoClient,
     utils::convert_to_float,
     Brc20Index, Brc20Inscription, ToDocument,
 };
 use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use log::{error, info};
-use mongodb::bson::{doc, Document};
+use mongodb::bson::{doc, Bson, Document};
 use serde::Serialize;
 use std::{collections::HashMap, fmt};
 
@@ -29,8 +28,6 @@ pub struct Brc20Mint {
 impl ToDocument for Brc20Mint {
     fn to_document(&self) -> Document {
         doc! {
-            // "_id": self.id.clone(),
-            // "ticker_id": self.ticker_id.clone(),
             "amt": self.amt,
             "block_height": self.block_height,
             "tx_height": self.tx_height,
@@ -38,7 +35,6 @@ impl ToDocument for Brc20Mint {
             "tx": self.tx.to_document(), // Convert GetRawTransactionResult to document
             "inscription": self.inscription.to_document(),
             "is_valid": self.is_valid,
-            // "created_at": self.created_at.clone(),
         }
     }
 }
@@ -132,12 +128,11 @@ impl Brc20Mint {
                 .await?;
         } else {
             // Set is_valid to true when the transaction is valid
-            is_valid = true;
+            self.is_valid = is_valid;
             let ticker = ticker_map.get_mut(&self.inscription.tick).unwrap();
-            ticker.add_mint(self.clone());
+            ticker.add_mint(self.clone(), mongo_client).await;
         }
 
-        self.is_valid = is_valid;
         Ok(self)
     }
 }
@@ -180,7 +175,45 @@ pub async fn handle_mint_operation(
         .insert_document(consts::COLLECTION_MINTS, validated_mint_tx.to_document())
         .await?;
 
-    //TODO: update userbalance and ticker structs in mongodb
+    // retrieve ticker struct from mongodb
+    let ticker_doc_from_mongo = mongo_client
+        .get_document_by_field(
+            consts::COLLECTION_TICKERS,
+            "tick",
+            &validated_mint_tx.inscription.tick,
+        )
+        .await?;
+
+    let amount = validated_mint_tx.get_amount();
+    if let Some(mut ticker_doc) = ticker_doc_from_mongo {
+        // get ticker from ticker map
+        let ticker_from_map = brc20_index
+            .tickers
+            .get(&validated_mint_tx.inscription.tick)
+            .unwrap();
+
+        if let Some(total_minted) = ticker_doc.get("total_minted") {
+            if let Bson::Double(val) = total_minted {
+                ticker_doc.insert("total_minted", Bson::Double(val + amount));
+            }
+        }
+        println!("debug #1");
+        let update_doc = doc! {
+            "$set": {
+                consts::OVERALL_BALANCE: ticker_doc.get("total_minted").unwrap_or_else(|| &Bson::Double(0.0)),
+            }
+        };
+
+        // update ticker struct in mongodb
+        mongo_client
+            .update_document_by_field(
+                consts::COLLECTION_TICKERS,
+                "total_minted",
+                &ticker_from_map.get_total_supply().to_string(),
+                update_doc,
+            )
+            .await?;
+    }
 
     Ok(())
 }

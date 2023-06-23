@@ -1,6 +1,6 @@
 use super::{
-    deploy::Brc20Deploy, mint::Brc20Mint, transfer::Brc20Transfer, user_balance::UserBalance,
-    ToDocument,
+    consts, deploy::Brc20Deploy, mint::Brc20Mint, mongo::MongoClient, transfer::Brc20Transfer,
+    user_balance::UserBalance, ToDocument,
 };
 use bitcoin::{Address, OutPoint};
 use mongodb::bson::{doc, Document};
@@ -28,10 +28,7 @@ impl ToDocument for Brc20Ticker {
             "limit": self.limit,
             "max_supply": self.max_supply,
             "decimals": self.decimals as i64,
-            // "deploy": self.deploy.to_document(),
-            // "mints": self.mints,
-            // "transfers": self.transfers.clone(),
-            // "invalids": self.invalids.clone(),
+            "total_minted": self.total_minted,
             // "created_at": self.created_at.clone(),
         }
     }
@@ -81,20 +78,20 @@ impl Brc20Ticker {
 
     // Updates the sender's balance after a transfer send operation. It either adds the transaction
     // to an existing balance or creates a new balance for the sender if it doesn't already exist.
-    pub fn update_transfer_sends(&mut self, sender: Address, tx: Brc20Transfer) {
-        if let Some(user_balance) = self.balances.get_mut(&sender) {
+    pub fn update_transfer_sends(&mut self, from: Address, tx: Brc20Transfer) {
+        if let Some(user_balance) = self.balances.get_mut(&from) {
             user_balance.add_transfer_send(tx.clone());
         } else {
-            let mut new_user_balance = UserBalance::new();
+            let mut new_user_balance = UserBalance::new(from.to_string(), self.tick.clone());
             new_user_balance.add_transfer_send(tx.clone());
-            self.balances.insert(sender.clone(), new_user_balance);
+            self.balances.insert(from.clone(), new_user_balance);
         }
 
         // log to console
-        if let Some(user_balance) = self.balances.get(&sender) {
+        if let Some(user_balance) = self.balances.get(&from) {
             log::info!(
               "Transfer send from user {}: overall balance = {}, available balance = {}, transferable balance = {}",
-              sender,
+              from,
               user_balance.get_overall_balance(),
               user_balance.get_available_balance(),
               user_balance.get_transferable_balance()
@@ -104,20 +101,20 @@ impl Brc20Ticker {
 
     // Updates the receiver's balance after a transfer receive operation. It either adds the transaction
     // to an existing balance or creates a new balance for the receiver if it doesn't already exist.
-    pub fn update_transfer_receives(&mut self, receiver: Address, tx: Brc20Transfer) {
-        if let Some(user_balance) = self.balances.get_mut(&receiver) {
+    pub fn update_transfer_receives(&mut self, to: Address, tx: Brc20Transfer) {
+        if let Some(user_balance) = self.balances.get_mut(&to) {
             user_balance.add_transfer_receive(tx.clone());
         } else {
-            let mut new_user_balance = UserBalance::new();
+            let mut new_user_balance = UserBalance::new(to.to_string(), self.tick.clone());
             new_user_balance.add_transfer_receive(tx.clone());
-            self.balances.insert(receiver.clone(), new_user_balance);
+            self.balances.insert(to.clone(), new_user_balance);
         }
 
         // log to console
-        if let Some(user_balance) = self.balances.get(&receiver) {
+        if let Some(user_balance) = self.balances.get(&to) {
             log::info!(
               "Transfer received for user {}: overall balance = {}, available balance = {}, transferable balance = {}",
-              receiver,
+              to,
               user_balance.get_overall_balance(),
               user_balance.get_available_balance(),
               user_balance.get_transferable_balance()
@@ -127,15 +124,29 @@ impl Brc20Ticker {
 
     // Adds a mint transaction to the owner's balance. If the owner's balance doesn't exist yet, it
     // creates a new one. Also updates the total minted tokens for this Brc20Ticker.
-    pub fn add_mint(&mut self, mint: Brc20Mint) {
+    pub async fn add_mint(&mut self, mint: Brc20Mint, mongo_client: &MongoClient) {
         let owner = mint.to.clone();
+        let mint_amount = mint.get_amount();
+
         // add mint to UserBalance
         if let Some(balance) = self.balances.get_mut(&owner) {
             balance.add_mint_tx(mint.clone());
+
+            // TODO: Verify user balance exists in momgodb else panic
+            // Update user overall balance and available for the receiver in MongoDB
+            mongo_client
+                .update_receiver_balance_document(&owner.to_string(), mint_amount, &self.tick)
+                .await
+                .unwrap();
         } else {
-            let mut user_balance = UserBalance::new();
+            let mut user_balance = UserBalance::new(mint.to.to_string(), self.tick.clone());
             user_balance.add_mint_tx(mint.clone());
-            self.balances.insert(owner.clone(), user_balance);
+            self.balances.insert(owner.clone(), user_balance.clone());
+
+            // Insert the UserBalance into MongoDB
+            let _ = mongo_client
+                .insert_document(consts::COLLECTION_USER_BALANCES, user_balance.to_document())
+                .await;
         }
         // update total minted tokens
         self.total_minted += mint.amt;
@@ -155,6 +166,12 @@ impl Brc20Ticker {
                 self.get_total_supply()
             );
         }
+
+        // Update total minted tokens for this ticker in MongoDB
+        mongo_client
+            .update_brc20_ticker_total_minted(&self.tick, mint_amount)
+            .await
+            .unwrap();
     }
 
     // get balances

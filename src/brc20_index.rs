@@ -1,17 +1,16 @@
-use crate::mongo::MongoClient;
-
 use self::{
     brc20_ticker::Brc20Ticker,
     deploy::handle_deploy_operation,
     invalid_brc20::InvalidBrc20TxMap,
     mint::handle_mint_operation,
-    transfer::handle_transfer_operation,
+    mongo::MongoClient,
+    transfer::{handle_transfer_operation, Brc20Transfer},
     utils::{
         extract_and_process_witness_data, get_owner_of_vout, get_witness_data_from_raw_tx,
         write_tickers_to_file,
     },
 };
-use bitcoin::OutPoint;
+use bitcoin::{Address, OutPoint};
 use bitcoincore_rpc::bitcoincore_rpc_json::{
     GetRawTransactionResult, GetRawTransactionResultVin, GetRawTransactionResultVout,
     GetRawTransactionResultVoutScriptPubKey,
@@ -23,12 +22,13 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs::DirBuilder, thread::sleep, time::Duration};
 
 mod brc20_ticker;
-mod consts;
+pub mod consts;
 mod deploy;
 mod invalid_brc20;
 mod mint;
+mod mongo;
 mod transfer;
-mod user_balance;
+pub mod user_balance;
 mod utils;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -176,6 +176,31 @@ impl Brc20Index {
             };
 
             let receiver_address = get_owner_of_vout(&raw_tx_info, proper_vout)?;
+            let amount = brc20_transfer_tx.get_amount();
+            let from = brc20_transfer_tx.from.clone();
+
+            let ticker_symbol = &brc20_ticker.tick.clone();
+
+            // // Fetch existing balances for sender and receiver
+            // let sender_balance_doc = mongo_client
+            //     .get_user_balance_document(
+            //         consts::COLLECTION_USER_BALANCES,
+            //         doc! {
+            //             "ticker": ticker_symbol,
+            //             "address": from.to_string(),
+            //         },
+            //     )
+            //     .await?;
+
+            // let receiver_balance_doc = mongo_client
+            //     .get_user_balance_document(
+            //         consts::COLLECTION_USER_BALANCES,
+            //         doc! {
+            //             "ticker": ticker_symbol,
+            //             "address": receiver_address.to_string(),
+            //         },
+            //     )
+            //     .await?;
 
             // update transfer struct with receiver address
             let brc20_transfer_tx = brc20_transfer_tx
@@ -183,14 +208,43 @@ impl Brc20Index {
                 .set_transfer_tx(raw_tx_info.clone());
 
             // Update user balances
-            brc20_ticker.update_transfer_receives(receiver_address, brc20_transfer_tx.clone());
-            brc20_ticker.update_transfer_sends(brc20_transfer_tx.from.clone(), brc20_transfer_tx);
+            brc20_ticker
+                .update_transfer_receives(receiver_address.clone(), brc20_transfer_tx.clone());
+            brc20_ticker.update_transfer_sends(from.clone(), brc20_transfer_tx.clone());
 
             self.remove_active_transfer_balance(&outpoint);
 
-            // TODO: insert/update MongoDB document
-            // update userbalances in mongodb
-            // update ticker in mongodb
+            let send_tx = match brc20_transfer_tx.send_tx.clone() {
+                Some(send_tx) => send_tx,
+                None => {
+                    log::error!("No send tx found for transfer tx: {:?}", brc20_transfer_tx);
+                    continue;
+                }
+            };
+
+            //-------------MONGODB-------------------//
+            // Update the transfer document in MongoDB
+            update_transfer_document(
+                mongo_client,
+                &brc20_transfer_tx,
+                &receiver_address,
+                &send_tx,
+            )
+            .await?;
+
+            // Update user available and transferable balance for the sender in MongoDB
+            mongo_client
+                .update_sender_user_balance_document(&from.to_string(), amount, &ticker_symbol)
+                .await?;
+
+            // Update user overall balance for the receiver in MongoDB
+            mongo_client
+                .update_receiver_balance_document(
+                    &receiver_address.to_string(),
+                    amount,
+                    &ticker_symbol,
+                )
+                .await?;
         }
 
         Ok(())
@@ -419,4 +473,55 @@ impl ToDocument for GetRawTransactionResultVout {
             "script_pub_key": self.script_pub_key.to_document(),
         }
     }
+}
+
+// This function will update the transfer document in MongoDB with receiver and send_tx
+pub async fn update_transfer_document(
+    mongo_client: &MongoClient,
+    brc20_transfer_tx: &Brc20Transfer,
+    receiver_address: &Address,
+    send_tx: &GetRawTransactionResult,
+) -> Result<(), anyhow::Error> {
+    println!("update_transfer_document");
+
+    let update_doc = doc! {
+        "$set": {
+            "receiver": receiver_address.to_string(),
+            "send_tx": send_tx.to_document(),
+        }
+    };
+
+    // Update the document in MongoDB
+    mongo_client
+        .update_document_by_field(
+            consts::COLLECTION_TRANSFERS,
+            "tx.txid",
+            &brc20_transfer_tx.tx.txid.to_string(),
+            update_doc,
+        )
+        .await?;
+    // // get the transfer from mongodb
+    // let transfer_mongo_doc = mongo_client
+    //     .get_document_by_field(
+    //         consts::COLLECTION_TRANSFERS,
+    //         "tx.txid",
+    //         &brc20_transfer_tx.tx.txid.to_string(),
+    //     )
+    //     .await?;
+
+    // match transfer_mongo_doc {
+    //     Some(transfer_doc) => {
+    //         // Update the document in MongoDB
+    //         mongo_client
+    //             .update_document_by_field(
+    //                 consts::COLLECTION_TRANSFERS,
+    //                 "tx.txid",
+    //                 &brc20_transfer_tx.tx.txid.to_string(),
+    //                 brc20_transfer_tx.to_document(),
+    //             )
+    //             .await?;
+    //     }
+    //     None => {}
+    // }
+    Ok(())
 }

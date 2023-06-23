@@ -1,12 +1,15 @@
-use super::{mint::Brc20Mint, transfer::Brc20Transfer};
+use super::{mint::Brc20Mint, transfer::Brc20Transfer, ToDocument};
 use bitcoin::OutPoint;
+use mongodb::bson::{doc, Document};
 use serde::Serialize;
 use std::{collections::HashMap, fmt};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UserBalance {
+    pub address: String,
+    pub tick: String,
     pub overall_balance: f64,
-    pub availble_balance: f64,
+    pub available_balance: f64,
     pub transferable_balance: f64,
     active_transfer_inscriptions: HashMap<OutPoint, Brc20Transfer>,
     transfer_sends: Vec<Brc20Transfer>,
@@ -14,11 +17,25 @@ pub struct UserBalance {
     mints: Vec<Brc20Mint>,
 }
 
+impl ToDocument for UserBalance {
+    fn to_document(&self) -> Document {
+        doc! {
+            "address": self.address.to_string(),
+            "tick": self.tick.clone(),
+            "overall_balance": self.overall_balance,
+            "available_balance": self.available_balance,
+            "transferable_balance": self.transferable_balance,
+        }
+    }
+}
+
 impl UserBalance {
-    pub fn new() -> Self {
+    pub fn new(address: String, tick: String) -> Self {
         UserBalance {
+            address,
+            tick,
             overall_balance: 0.0,
-            availble_balance: 0.0,
+            available_balance: 0.0,
             transferable_balance: 0.0,
             active_transfer_inscriptions: HashMap::new(),
             transfer_sends: Vec::new(),
@@ -110,7 +127,7 @@ impl UserBalance {
 
     pub fn set_balances(&mut self) {
         self.overall_balance = self.get_overall_balance();
-        self.availble_balance = self.get_available_balance();
+        self.available_balance = self.get_available_balance();
         self.transferable_balance = self.get_transferable_balance();
     }
 }

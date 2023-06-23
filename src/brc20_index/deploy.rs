@@ -1,6 +1,5 @@
-use crate::mongo::MongoClient;
-
 use super::invalid_brc20::{InvalidBrc20Tx, InvalidBrc20TxMap};
+use super::mongo::MongoClient;
 use super::{brc20_ticker::Brc20Ticker, utils::convert_to_float, Brc20Inscription};
 use super::{Brc20Index, ToDocument};
 use crate::brc20_index::consts;

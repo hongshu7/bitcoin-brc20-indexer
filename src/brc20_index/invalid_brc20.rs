@@ -26,11 +26,9 @@ impl InvalidBrc20Tx {
 impl ToDocument for InvalidBrc20Tx {
     fn to_document(&self) -> Document {
         doc! {
-            // "_id": self.id.clone(),
             "tx_id": self.tx_id.to_string(),
             "inscription": self.inscription.to_document(),
             "reason": self.reason.clone(),
-            // "created_at": self.created_at.clone(),
         }
     }
 }
