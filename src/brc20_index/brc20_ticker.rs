@@ -125,15 +125,16 @@ impl Brc20Ticker {
 
     // Adds a mint transaction to the owner's balance. If the owner's balance doesn't exist yet, it
     // creates a new one. Also updates the total minted tokens for this Brc20Ticker.
-    pub async fn add_mint(&mut self, mint: Brc20Mint, mongo_client: &MongoClient) {
+    pub async fn add_mint_to_ticker(&mut self, mint: Brc20Mint, mongo_client: &MongoClient) {
         let owner = mint.to.clone();
         let mint_amount = mint.get_amount();
 
-        // add mint to UserBalance
+        // get UserBalance from ticker hashmap and add mint
         if let Some(balance) = self.balances.get_mut(&owner) {
             balance.add_mint_tx(mint.clone());
 
-            // TODO: Verify user balance exists in momgodb else panic
+            // TODO: Verify user balance exists in mongodb else panic
+
             // Update user overall balance and available for the receiver in MongoDB
             mongo_client
                 .update_receiver_balance_document(
@@ -144,6 +145,7 @@ impl Brc20Ticker {
                 .await
                 .unwrap();
         } else {
+            //if user balance doesn not exist, create a new one
             let mut user_balance = UserBalance::new(mint.to.to_string(), self.get_ticker().clone());
             user_balance.add_mint_tx(mint.clone());
             self.balances.insert(owner.clone(), user_balance.clone());
@@ -153,10 +155,18 @@ impl Brc20Ticker {
                 .insert_document(consts::COLLECTION_USER_BALANCES, user_balance.to_document())
                 .await;
         }
-        // update total minted tokens
+        // update total minted tokens for ticker
         self.total_minted += mint.amt;
         self.mints.push(mint);
 
+        // Update total minted tokens for this ticker in MongoDB
+        mongo_client
+            .update_brc20_ticker_total_minted(&self.get_ticker(), mint_amount)
+            .await
+            .unwrap();
+
+        //--------------//
+        // log to console
         if let Some(user_balance) = self.get_user_balance(&owner) {
             log::info!(
               "Minted tokens for user {}: overall balance = {}, available balance = {}, transferable balance = {}",
@@ -171,12 +181,6 @@ impl Brc20Ticker {
                 self.get_total_supply()
             );
         }
-
-        // Update total minted tokens for this ticker in MongoDB
-        mongo_client
-            .update_brc20_ticker_total_minted(&self.get_ticker(), mint_amount)
-            .await
-            .unwrap();
     }
 
     // get balances

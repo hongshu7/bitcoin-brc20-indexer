@@ -113,9 +113,12 @@ impl MongoClient {
             .await?;
 
         match user_balance_from {
+            // if the user balance document exists
             Some(mut user_balance_doc) => {
+                // Inscribing a transfer affects the available balance and the transferable balance of the user
                 if let Some(available_balance) = user_balance_doc.get(consts::AVAILABLE_BALANCE) {
                     if let Bson::Double(val) = available_balance {
+                        // TODO: will need to verify that val - amount is not less than 0
                         user_balance_doc
                             .insert(consts::AVAILABLE_BALANCE, Bson::Double(val - amount));
                     }
@@ -130,8 +133,7 @@ impl MongoClient {
                     }
                 }
 
-                // create an update document using $set operator
-                println!("debug #3");
+                // create an update document
                 let update_doc = doc! {
                     "$set": {
                         consts::TRANSFERABLE_BALANCE: user_balance_doc.get(consts::TRANSFERABLE_BALANCE).unwrap_or_else(|| &Bson::Double(0.0)),
@@ -204,11 +206,8 @@ impl MongoClient {
     ) -> Result<(), mongodb::error::Error> {
         let db = self.client.database(&self.db_name);
         let collection = db.collection::<bson::Document>(collection_name);
-
         let filter = doc! { field_name: field_value };
-
         let update_options = UpdateOptions::builder().upsert(false).build();
-
         collection
             .update_one(filter, update_doc, update_options)
             .await?;
@@ -225,11 +224,7 @@ impl MongoClient {
     ) -> Result<(), mongodb::error::Error> {
         let db = self.client.database(&self.db_name);
         let collection = db.collection::<bson::Document>(collection_name);
-
-        println!("debug #2");
-        // let update = doc! { "$set": update_doc };
         let update_options = UpdateOptions::builder().upsert(false).build();
-
         collection
             .update_one(filter, update_doc, update_options)
             .await?;
@@ -249,8 +244,6 @@ impl MongoClient {
         let filter = doc! { "tick": ticker };
         let ticker_doc = collection.find_one(filter.clone(), None).await?;
 
-        println!("ticker_doc: {:?}", ticker_doc);
-
         match ticker_doc {
             Some(mut ticker) => {
                 if let Some(total_minted) = ticker.get("total_minted") {
@@ -264,10 +257,6 @@ impl MongoClient {
                         "total_minted": ticker.get("total_minted").unwrap_or_else(|| &Bson::Double(0.0)),
                     }
                 };
-
-                // // Update the document in MongoDB
-                // self.update_document_by_filter(consts::COLLECTION_TICKERS, filter, update_doc)
-                //     .await?;
 
                 // Update the document in the collection
                 let update_options = UpdateOptions::builder().upsert(false).build();
@@ -300,6 +289,7 @@ impl MongoClient {
             .await?;
 
         match user_balance_to {
+            // if the user balance document exists in Mongodb, update it
             Some(mut user_balance_doc) => {
                 if let Some(overall_balance) = user_balance_doc.get(consts::OVERALL_BALANCE) {
                     if let Bson::Double(val) = overall_balance {
@@ -315,9 +305,7 @@ impl MongoClient {
                     }
                 }
 
-                // create an update document using $set operator
-
-                println!("debug #4");
+                // create an update document
                 let update_doc = doc! {
                     "$set": {
                         consts::OVERALL_BALANCE: user_balance_doc.get(consts::OVERALL_BALANCE).unwrap_or_else(|| &Bson::Double(0.0)),
@@ -333,6 +321,7 @@ impl MongoClient {
                 )
                 .await?;
             }
+            // if the user balance document does not exist in MongoDB, create a new one
             None => {
                 // Create a new UserBalance
                 let mut user_balance = UserBalance::new(receiver_address.clone(), tick.to_string());

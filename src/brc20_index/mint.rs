@@ -3,6 +3,7 @@ use super::{
     consts,
     invalid_brc20::{InvalidBrc20Tx, InvalidBrc20TxMap},
     mongo::MongoClient,
+    user_balance::UserBalance,
     utils::convert_to_float,
     Brc20Index, Brc20Inscription, ToDocument,
 };
@@ -80,6 +81,7 @@ impl Brc20Mint {
         let mut reason = String::new();
 
         if let Some(ticker) = ticker_map.get(&self.inscription.tick.to_lowercase()) {
+            //TODO: get these values from db
             let limit = ticker.get_limit();
             let max_supply = ticker.get_max_supply();
             let total_minted = ticker.get_total_supply();
@@ -118,7 +120,10 @@ impl Brc20Mint {
         }
 
         if !is_valid {
+            // Set is_valid to false when the transaction is invalid
             error!("INVALID: {}", reason);
+
+            // Add the invalid mint transaction to the invalid transaction map
             let invalid_tx = InvalidBrc20Tx::new(self.tx.txid, self.inscription.clone(), reason);
             invalid_tx_map.add_invalid_tx(invalid_tx.clone());
 
@@ -129,12 +134,15 @@ impl Brc20Mint {
         } else {
             // Set is_valid to true when the transaction is valid
             self.is_valid = is_valid;
+
+            //get ticker for this mint
             let ticker = ticker_map
                 .get_mut(&self.inscription.tick.to_lowercase())
                 .unwrap();
-            ticker.add_mint(self.clone(), mongo_client).await;
-        }
 
+            ticker.add_mint_to_ticker(self.clone(), mongo_client).await;
+        }
+        // Return the updated mint transaction, which might be valid or invalid
         Ok(self)
     }
 }
@@ -171,6 +179,7 @@ pub async fn handle_mint_operation(
         info!("Mint: {:?}", validated_mint_tx.get_mint());
         info!("TO Address: {:?}", validated_mint_tx.to);
 
+        //---------------MONGO DOB-----------------//
         // Add the mint transaction to the mongo database
         mongo_client
             .insert_document(consts::COLLECTION_MINTS, validated_mint_tx.to_document())
