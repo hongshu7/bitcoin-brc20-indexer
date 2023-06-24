@@ -32,7 +32,7 @@ impl ToDocument for Brc20Mint {
             "block_height": self.block_height,
             "tx_height": self.tx_height,
             "to": self.to.to_string(),
-            "tx": self.tx.to_document(), // Convert GetRawTransactionResult to document
+            "tx": self.tx.to_document(),
             "inscription": self.inscription.to_document(),
             "is_valid": self.is_valid,
         }
@@ -86,7 +86,7 @@ impl Brc20Mint {
             let total_minted = ticker.get_total_supply();
             let amount = match self.inscription.amt.as_ref().map(String::as_str) {
                 Some(amt_str) => convert_to_float(amt_str, ticker.get_decimals()),
-                None => Ok(0.0), // Set a default value if the amount is not present
+                None => Ok(0.0),
             };
 
             match amount {
@@ -132,6 +132,7 @@ impl Brc20Mint {
                 .await?;
         } else {
             // Set is_valid to true when the transaction is valid
+            println!("VALID: Mint inscription added: {:#?}", self.inscription);
             self.is_valid = is_valid;
 
             //get ticker for this mint
