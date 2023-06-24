@@ -17,22 +17,26 @@ spec:
     spec:
       containers:
         - name: omnisat-indexer-rs
-          image: gcr.io/pineappleworkshop/omnisat-indexer-rs:0.0.12
+          image: gcr.io/pineappleworkshop/omnisat-indexer-rs:0.0.13
           env:
             - name: ENV
               value: 'dev'
-            - name: RPC_USER
+            - name: CONSUL_HOST
               valueFrom: 
-                secretKeyRef: 
-                  name: omnisat-indexer-rs-secret
-                  key: btc_rpc_user
-            - name: RPC_PASSWORD
-              valueFrom: 
-                secretKeyRef: 
-                  name: omnisat-indexer-rs-secret
-                  key: btc_rpc_password
-            - name: RPC_URL
-              valueFrom: 
-                secretKeyRef: 
-                  name: omnisat-indexer-rs-secret
-                  key: btc_rpc_host
+              value: 'http://consul-server:8500'
+              # CONSUL_HOST
+            # - name: RPC_USER
+            #   valueFrom: 
+            #     secretKeyRef: 
+            #       name: omnisat-indexer-rs-secret
+            #       key: btc_rpc_user
+            # - name: RPC_PASSWORD
+            #   valueFrom: 
+            #     secretKeyRef: 
+            #       name: omnisat-indexer-rs-secret
+            #       key: btc_rpc_password
+            # - name: RPC_URL
+            #   valueFrom: 
+            #     secretKeyRef: 
+            #       name: omnisat-indexer-rs-secret
+            #       key: btc_rpc_host

@@ -16,10 +16,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logger and load env variables
     dotenv().ok();
     env_logger::init();
-
+    let consul_host = env::var("CONSUL_HOST").unwrap();
     let client = ConsulClient::new(
         ConsulClientSettingsBuilder::default()
-            .address("http://localhost:8500")
+            .address(consul_host)
             .build()
             .unwrap(),
     )
@@ -46,10 +46,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rpc_password = json_value
         .get("btc_rpc_pass").unwrap().as_str()
         .unwrap_or_else(|| panic!("BTC_RPC_PASSWORD IS NOT SET"));
-
-    // println!("rpc_url: {}", rpc_url.to_string());
-    // println!("rpc_user: {}", rpc_user.to_string());
-    // println!("rpc_password: {}", rpc_password);
 
     // Retrieve the RPC url, user and password from environment variables
     // let rpc_url = env::var("RPC_URL").unwrap();
