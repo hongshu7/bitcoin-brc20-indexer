@@ -111,10 +111,7 @@ impl Brc20Transfer {
                     self.inscription.clone(),
                     reason.clone(),
                 ));
-                return Err(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    reason,
-                )));
+                return Ok(());
             }
         };
 
@@ -122,7 +119,7 @@ impl Brc20Transfer {
             .inscription
             .amt
             .as_ref()
-            .map(|amt_str| amt_str.parse::<f64>().unwrap_or(0.0))
+            .and_then(|amt_str| amt_str.parse::<f64>().ok())
             .unwrap_or(0.0);
 
         // print available balance

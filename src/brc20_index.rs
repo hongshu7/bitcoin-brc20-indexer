@@ -500,28 +500,5 @@ pub async fn update_transfer_document(
             update_doc,
         )
         .await?;
-    // // get the transfer from mongodb
-    // let transfer_mongo_doc = mongo_client
-    //     .get_document_by_field(
-    //         consts::COLLECTION_TRANSFERS,
-    //         "tx.txid",
-    //         &brc20_transfer_tx.tx.txid.to_string(),
-    //     )
-    //     .await?;
-
-    // match transfer_mongo_doc {
-    //     Some(transfer_doc) => {
-    //         // Update the document in MongoDB
-    //         mongo_client
-    //             .update_document_by_field(
-    //                 consts::COLLECTION_TRANSFERS,
-    //                 "tx.txid",
-    //                 &brc20_transfer_tx.tx.txid.to_string(),
-    //                 brc20_transfer_tx.to_document(),
-    //             )
-    //             .await?;
-    //     }
-    //     None => {}
-    // }
     Ok(())
 }

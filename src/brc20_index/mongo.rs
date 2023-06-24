@@ -175,7 +175,6 @@ impl MongoClient {
         let collection = db.collection::<bson::Document>(collection_name);
 
         collection.insert_one(document.clone(), None).await?;
-        println!("Inserted document with id {:?}", document);
 
         Ok(())
     }
@@ -208,8 +207,6 @@ impl MongoClient {
 
         let filter = doc! { field_name: field_value };
 
-        println!("debug #5");
-        // let update = doc! { "$set": update_doc };
         let update_options = UpdateOptions::builder().upsert(false).build();
 
         collection
