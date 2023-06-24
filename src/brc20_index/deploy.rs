@@ -82,7 +82,6 @@ impl Brc20Deploy {
         mongo_client: &MongoClient,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let ticker_symbol = self.inscription.tick.to_lowercase();
-
         let mut reasons = vec![];
 
         match self.validate_ticker_symbol(&ticker_symbol, ticker_map) {
@@ -235,6 +234,7 @@ pub async fn handle_deploy_operation(
     tx_height: u32,
     brc20_index: &mut Brc20Index,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // if invalid vaiidate_deploy_script handles and adds invalid to mongodb
     let validated_deploy_tx = Brc20Deploy::new(raw_tx, inscription, block_height, tx_height, owner)
         .validate_deploy_script(
             &mut brc20_index.invalid_tx_map,
@@ -244,8 +244,12 @@ pub async fn handle_deploy_operation(
         .await?;
 
     if validated_deploy_tx.is_valid() {
-        info!("Deploy: {:?}", validated_deploy_tx.get_deploy_script());
+        info!(
+            "VALID Deploy: {:?}",
+            validated_deploy_tx.get_deploy_script()
+        );
 
+        // A valid deploy means new BRC20Ticker to MongoDB
         // Instantiate a new `Brc20Ticker` struct and update the hashmap with the deploy information.
         let ticker = Brc20Ticker::new(validated_deploy_tx.clone());
         brc20_index
@@ -257,16 +261,15 @@ pub async fn handle_deploy_operation(
             .insert_document(consts::COLLECTION_TICKERS, ticker.to_document())
             .await?;
     } else {
-        // Insert the invalid deploy transaction into MongoDB
-        mongo_client
-            .insert_document(
-                consts::COLLECTION_INVALIDS,
-                validated_deploy_tx.to_document(),
-            )
-            .await?;
+        error!(
+            "Invalid deploy: {:?}",
+            validated_deploy_tx.get_deploy_script()
+        );
     }
 
-    // Insert the deploy transaction into MongoDB
+    // Insert the deploy transaction into MongoDB whether valid or not
+    // do we want to store invalid deploys with complete tx data?
+    // we have a InvalidTx struct that includes txid, inscription, and reason
     mongo_client
         .insert_document(
             consts::COLLECTION_DEPLOYS,

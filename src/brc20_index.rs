@@ -511,11 +511,9 @@ pub async fn update_transfer_document(
     receiver_address: &Address,
     send_tx: &GetRawTransactionResult,
 ) -> Result<(), anyhow::Error> {
-    println!("update_transfer_document");
-
     let update_doc = doc! {
         "$set": {
-            "receiver": receiver_address.to_string(),
+            "to": receiver_address.to_string(),
             "send_tx": send_tx.to_document(),
         }
     };

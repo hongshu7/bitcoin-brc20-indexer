@@ -86,14 +86,23 @@ impl Brc20Transfer {
 
         let ticker = match index.get_ticker_mut(ticker_symbol) {
             Some(ticker) => ticker,
+            // if ticker not found, add invalid tx and return
             None => {
                 let reason = "Ticker not found".to_string();
                 error!("INVALID: {}", reason);
-                index.invalid_tx_map.add_invalid_tx(InvalidBrc20Tx::new(
-                    self.tx.txid,
-                    self.inscription.clone(),
-                    reason.clone(),
-                ));
+
+                // Create invalid deploy transaction
+                let invalid_tx =
+                    InvalidBrc20Tx::new(self.tx.txid, self.inscription.clone(), reason.clone());
+
+                // Add invalid deploy transaction to invalid tx map
+                index.invalid_tx_map.add_invalid_tx(invalid_tx.clone());
+
+                // Insert the invalid deploy transaction into MongoDB
+                mongo_client
+                    .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
+                    .await?;
+
                 return Err(Box::new(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     reason,
@@ -103,18 +112,27 @@ impl Brc20Transfer {
 
         let user_balance = match ticker.get_user_balance_mut(&from) {
             Some(balance) => balance,
+            // if user balance not found, add invalid tx and return
             None => {
                 let reason = "User balance not found".to_string();
                 error!("INVALID: {}", reason);
-                index.invalid_tx_map.add_invalid_tx(InvalidBrc20Tx::new(
-                    self.tx.txid,
-                    self.inscription.clone(),
-                    reason.clone(),
-                ));
+
+                // Create invalid deploy transaction
+                let invalid_tx =
+                    InvalidBrc20Tx::new(self.tx.txid, self.inscription.clone(), reason.clone());
+
+                // Add invalid deploy transaction to invalid tx map
+                index.invalid_tx_map.add_invalid_tx(invalid_tx.clone());
+
+                // Insert the invalid deploy transaction into MongoDB
+                mongo_client
+                    .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
+                    .await?;
                 return Ok(());
             }
         };
 
+        // get transfer amount
         let transfer_amount = self
             .inscription
             .amt
@@ -122,19 +140,17 @@ impl Brc20Transfer {
             .and_then(|amt_str| amt_str.parse::<f64>().ok())
             .unwrap_or(0.0);
 
-        // print available balance
-        println!(
-            "Available balance: {}",
-            user_balance.get_available_balance()
-        );
-
+        // TODO: get avail bal from db
+        // check if user has enough balance to transfer
         if user_balance.get_available_balance() >= transfer_amount {
+            // if valid, add transfer inscription to user balance
             self.is_valid = true;
             println!("VALID: Transfer inscription added. From: {:#?}", from);
 
             // Increase the transferable balance of the sender
             user_balance.add_transfer_inscription(self.clone());
 
+            // Update the user balance document in MongoDB
             mongo_client
                 .update_transfer_inscriber_user_balance_document(
                     &from.to_string(),
@@ -143,9 +159,14 @@ impl Brc20Transfer {
                 )
                 .await?;
         } else {
+            // if invalid, add invalid tx and return
             let reason = "Transfer amount exceeds available balance".to_string();
             error!("INVALID: {}", reason);
+
+            // Create invalid deploy transaction
             let invalid_tx = InvalidBrc20Tx::new(self.tx.txid, self.inscription.clone(), reason);
+
+            // Add invalid deploy transaction to invalid tx map
             index.invalid_tx_map.add_invalid_tx(invalid_tx.clone());
 
             // Insert the invalid deploy transaction into MongoDB
@@ -168,6 +189,9 @@ impl fmt::Display for Brc20Transfer {
         writeln!(f, "Inscription TransactionId: {}", self.tx.txid)?;
         writeln!(f, "Transfer Transaction: {:?}", self.send_tx)?;
         writeln!(f, "Transfer Script: {:#?}", self.inscription)?;
+        writeln!(f, "Block Height: {}", self.block_height)?;
+        writeln!(f, "Transaction Height: {}", self.tx_height)?;
+        writeln!(f, "From: {:?}", self.from)?;
         writeln!(f, "Amount: {}", self.amt)?;
         writeln!(f, "Receiver: {:?}", self.to)?;
         writeln!(f, "Is Valid: {}", self.is_valid)?;
@@ -184,8 +208,11 @@ pub async fn handle_transfer_operation(
     sender: Address,
     brc20_index: &mut Brc20Index,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Create a new transfer transaction
     let mut validated_transfer_tx =
         Brc20Transfer::new(raw_tx, inscription, block_height, tx_height, sender);
+
+    // Handle the transfer transaction
     let _ = validated_transfer_tx
         .handle_inscribe_transfer(brc20_index, mongo_client)
         .await?;
@@ -229,6 +256,7 @@ impl ToDocument for Brc20Transfer {
             "tx": self.tx.to_document(), // Convert GetRawTransactionResult to document
             "inscription": self.inscription.to_document(),
             "send_tx": self.send_tx.clone().map(|tx| tx.to_document()), // Convert Option<GetRawTransactionResult> to document
+            "from": self.from.to_string(),
             "to": self.to.clone().map(|addr| addr.to_string()), // Convert Option<Address> to string
             "is_valid": self.is_valid,
         }
