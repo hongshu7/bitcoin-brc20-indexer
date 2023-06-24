@@ -189,6 +189,9 @@ impl fmt::Display for Brc20Transfer {
         writeln!(f, "Inscription TransactionId: {}", self.tx.txid)?;
         writeln!(f, "Transfer Transaction: {:?}", self.send_tx)?;
         writeln!(f, "Transfer Script: {:#?}", self.inscription)?;
+        writeln!(f, "Block Height: {}", self.block_height)?;
+        writeln!(f, "Transaction Height: {}", self.tx_height)?;
+        writeln!(f, "From: {:?}", self.from)?;
         writeln!(f, "Amount: {}", self.amt)?;
         writeln!(f, "Receiver: {:?}", self.to)?;
         writeln!(f, "Is Valid: {}", self.is_valid)?;
@@ -253,6 +256,7 @@ impl ToDocument for Brc20Transfer {
             "tx": self.tx.to_document(), // Convert GetRawTransactionResult to document
             "inscription": self.inscription.to_document(),
             "send_tx": self.send_tx.clone().map(|tx| tx.to_document()), // Convert Option<GetRawTransactionResult> to document
+            "from": self.from.to_string(),
             "to": self.to.clone().map(|addr| addr.to_string()), // Convert Option<Address> to string
             "is_valid": self.is_valid,
         }
