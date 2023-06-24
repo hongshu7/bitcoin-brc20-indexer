@@ -1,44 +1,61 @@
-use super::brc20_tx::{Brc20Tx, InvalidBrc20Tx, InvalidBrc20TxMap};
-use super::Brc20Index;
+use super::invalid_brc20::{InvalidBrc20Tx, InvalidBrc20TxMap};
+use super::mongo::MongoClient;
 use super::{brc20_ticker::Brc20Ticker, utils::convert_to_float, Brc20Inscription};
-use log::info;
+use super::{Brc20Index, ToDocument};
+use crate::brc20_index::consts;
+use bitcoin::Address;
+use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
+use log::{error, info};
+use mongodb::bson::{doc, Document};
 use serde::Serialize;
 use std::{collections::HashMap, fmt};
 
 #[derive(Debug, Clone, Serialize)]
-pub struct Brc20DeployTx {
-    max_supply: f64,
-    limit: f64,
-    decimals: u8,
-    brc20_tx: Brc20Tx,
-    deploy_script: Brc20Inscription,
-    is_valid: bool,
+pub struct Brc20Deploy {
+    pub max: f64,
+    pub lim: f64,
+    pub dec: u8,
+    pub block_height: u32,
+    pub tx_height: u32,
+    pub owner: Address,
+    pub tx: GetRawTransactionResult,
+    pub inscription: Brc20Inscription,
+    pub is_valid: bool,
 }
 
-impl Brc20DeployTx {
-    pub fn new(brc20_tx: Brc20Tx, deploy_script: Brc20Inscription) -> Self {
+impl Brc20Deploy {
+    pub fn new(
+        tx: GetRawTransactionResult,
+        inscription: Brc20Inscription,
+        block_height: u32,
+        tx_height: u32,
+        owner: Address,
+    ) -> Self {
         // populate with default values
-        Brc20DeployTx {
-            max_supply: 0.0,
-            limit: 0.0,
-            decimals: 18,
-            brc20_tx,
-            deploy_script,
+        Brc20Deploy {
+            max: 0.0,
+            lim: 0.0,
+            dec: 18,
+            block_height,
+            tx_height,
+            owner,
+            tx,
+            inscription,
             is_valid: false,
         }
     }
 
     // getters and setters
     pub fn get_max_supply(&self) -> f64 {
-        self.max_supply
+        self.max
     }
 
     pub fn get_limit(&self) -> f64 {
-        self.limit
+        self.lim
     }
 
     pub fn get_decimals(&self) -> u8 {
-        self.decimals
+        self.dec
     }
 
     pub fn is_valid(&self) -> bool {
@@ -51,44 +68,57 @@ impl Brc20DeployTx {
     }
 
     pub fn get_deploy_script(&self) -> &Brc20Inscription {
-        &self.deploy_script
+        &self.inscription
     }
 
-    pub fn get_brc20_tx(&self) -> &Brc20Tx {
-        &self.brc20_tx
+    pub fn get_raw_tx(&self) -> &GetRawTransactionResult {
+        &self.tx
     }
 
-    pub fn validate_deploy_script(
+    pub async fn validate_deploy_script(
         mut self,
         invalid_tx_map: &mut InvalidBrc20TxMap,
         ticker_map: &HashMap<String, Brc20Ticker>,
-    ) -> Self {
-        let ticker_symbol = self.deploy_script.tick.to_lowercase();
+        mongo_client: &MongoClient,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let ticker_symbol = self.inscription.tick.to_lowercase();
 
         let mut reasons = vec![];
 
         match self.validate_ticker_symbol(&ticker_symbol, ticker_map) {
             Ok(_) => {}
-            Err(reason) => reasons.push(reason),
+            Err(reason) => {
+                error!("INVALID: {}", reason);
+                reasons.push(reason)
+            }
         }
 
         match self.validate_decimals_field() {
             Ok(_) => {}
-            Err(reason) => reasons.push(reason),
+            Err(reason) => {
+                error!("INVALID: {}", reason);
+                reasons.push(reason)
+            }
         }
 
         match self.validate_max_field() {
             Ok(max) => {
-                self.max_supply = max;
+                self.max = max;
             }
-            Err(reason) => reasons.push(reason),
+            Err(reason) => {
+                error!("INVALID: {}", reason);
+                reasons.push(reason)
+            }
         }
 
-        match self.validate_limit_field(self.max_supply) {
+        match self.validate_limit_field(self.max) {
             Ok(limit) => {
-                self.limit = limit;
+                self.lim = limit;
             }
-            Err(reason) => reasons.push(reason),
+            Err(reason) => {
+                error!("INVALID: {}", reason);
+                reasons.push(reason)
+            }
         }
 
         let valid_deploy_tx = self.set_valid(reasons.is_empty());
@@ -96,14 +126,19 @@ impl Brc20DeployTx {
         if !valid_deploy_tx.is_valid() {
             let reason = reasons.join("; ");
             let invalid_tx = InvalidBrc20Tx::new(
-                *valid_deploy_tx.get_brc20_tx().get_txid(),
-                valid_deploy_tx.deploy_script.clone(),
+                valid_deploy_tx.tx.txid,
+                valid_deploy_tx.inscription.clone(),
                 reason,
             );
-            invalid_tx_map.add_invalid_tx(invalid_tx);
+            invalid_tx_map.add_invalid_tx(invalid_tx.clone());
+
+            // insert invalid deploy tx into mongodb
+            mongo_client
+                .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
+                .await?;
         }
 
-        valid_deploy_tx
+        Ok(valid_deploy_tx)
     }
 
     fn validate_ticker_symbol(
@@ -113,7 +148,7 @@ impl Brc20DeployTx {
     ) -> Result<(), String> {
         if ticker_map.contains_key(ticker_symbol) {
             Err("Ticker symbol already exists".to_string())
-        } else if self.deploy_script.tick.chars().count() != 4 {
+        } else if self.inscription.tick.chars().count() != 4 {
             Err("Ticker symbol must be 4 characters long".to_string())
         } else {
             Ok(())
@@ -121,27 +156,29 @@ impl Brc20DeployTx {
     }
 
     fn validate_decimals_field(&mut self) -> Result<(), String> {
-        if let Some(decimals) = &self.deploy_script.dec {
+        if let Some(decimals) = &self.inscription.dec {
             let parsed_decimals = match decimals.parse::<u8>() {
                 Ok(value) => value,
-                Err(_) => return Err("Decimals field must be a valid unsigned integer".to_string()),
+                Err(_) => {
+                    return Err("Decimals field must be a valid unsigned integer".to_string());
+                }
             };
 
             if parsed_decimals > 18 {
                 return Err("Decimals must be 18 or less".to_string());
             }
 
-            self.decimals = parsed_decimals;
+            self.dec = parsed_decimals;
         }
 
         Ok(())
     }
 
     fn validate_max_field(&self) -> Result<f64, String> {
-        match &self.deploy_script.max {
-            Some(max_str) => match convert_to_float(max_str, self.decimals) {
+        match &self.inscription.max {
+            Some(max_str) => match convert_to_float(max_str, self.dec) {
                 Ok(max) => {
-                    if max > 0.0 && decimal_places(max) <= self.decimals.into() {
+                    if max > 0.0 && decimal_places(max) <= self.dec.into() {
                         Ok(max)
                     } else {
                         Err("Max supply must be greater than 0 and the number of decimal places must not exceed the decimal value.".to_string())
@@ -149,15 +186,18 @@ impl Brc20DeployTx {
                 }
                 Err(_) => Err("Max field must be a valid number.".to_string()),
             },
-            None => Err("Max field is missing.".to_string()),
+            None => {
+                error!("Max field is missing.");
+                Err("Max field is missing.".to_string())
+            }
         }
     }
 
     fn validate_limit_field(&self, max: f64) -> Result<f64, String> {
-        match &self.deploy_script.lim {
-            Some(lim_str) => match convert_to_float(lim_str, self.decimals) {
+        match &self.inscription.lim {
+            Some(lim_str) => match convert_to_float(lim_str, self.dec) {
                 Ok(limit) => {
-                    if limit <= max && decimal_places(limit) <= self.decimals.into() {
+                    if limit <= max && decimal_places(limit) <= self.dec.into() {
                         Ok(limit)
                     } else {
                         Err("Limit must be less than or equal to max supply and the number of decimal places must not exceed the decimal value.".to_string())
@@ -170,21 +210,70 @@ impl Brc20DeployTx {
     }
 }
 
-pub fn handle_deploy_operation(
+impl ToDocument for Brc20Deploy {
+    fn to_document(&self) -> Document {
+        doc! {
+            "max": &self.max.to_string(),
+            "lim": &self.lim,
+            "dec": &self.dec.to_string(),
+            "block_height": &self.block_height,
+            "tx_height": &self.tx_height,
+            "created_by": &self.owner.to_string(),
+            "tx": &self.tx.to_document(),
+            "inscription": &self.inscription.to_document(),
+            "is_valid": &self.is_valid,
+        }
+    }
+}
+
+pub async fn handle_deploy_operation(
+    mongo_client: &MongoClient,
     inscription: Brc20Inscription,
-    brc20_tx: Brc20Tx,
+    raw_tx: GetRawTransactionResult,
+    owner: Address,
+    block_height: u32,
+    tx_height: u32,
     brc20_index: &mut Brc20Index,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let validated_deploy_tx = Brc20DeployTx::new(brc20_tx, inscription)
-        .validate_deploy_script(&mut brc20_index.invalid_tx_map, &brc20_index.tickers);
+    let validated_deploy_tx = Brc20Deploy::new(raw_tx, inscription, block_height, tx_height, owner)
+        .validate_deploy_script(
+            &mut brc20_index.invalid_tx_map,
+            &brc20_index.tickers,
+            &mongo_client,
+        )
+        .await?;
 
     if validated_deploy_tx.is_valid() {
         info!("Deploy: {:?}", validated_deploy_tx.get_deploy_script());
 
         // Instantiate a new `Brc20Ticker` struct and update the hashmap with the deploy information.
-        let ticker = Brc20Ticker::new(validated_deploy_tx);
-        brc20_index.tickers.insert(ticker.get_ticker(), ticker);
+        let ticker = Brc20Ticker::new(validated_deploy_tx.clone());
+        brc20_index
+            .tickers
+            .insert(ticker.get_ticker(), ticker.clone());
+
+        // Insert ticker into MongoDB
+        mongo_client
+            .insert_document(consts::COLLECTION_TICKERS, ticker.to_document())
+            .await?;
+    } else {
+        // Insert the invalid deploy transaction into MongoDB
+        mongo_client
+            .insert_document(
+                consts::COLLECTION_INVALIDS,
+                validated_deploy_tx.to_document(),
+            )
+            .await?;
     }
+
+    // Insert the deploy transaction into MongoDB
+    mongo_client
+        .insert_document(
+            consts::COLLECTION_DEPLOYS,
+            validated_deploy_tx.to_document(),
+        )
+        .await?;
+
     Ok(())
 }
 
@@ -198,17 +287,17 @@ fn decimal_places(num: f64) -> u32 {
     }
 }
 
-impl fmt::Display for Brc20DeployTx {
+impl fmt::Display for Brc20Deploy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Deploy Transaction:")?;
-        writeln!(f, "{}", self.brc20_tx)?;
-        writeln!(f, "Deploy Script: {:#?}", self.deploy_script)?;
+        writeln!(f, "Deploy TransactionId:")?;
+        writeln!(f, "{}", self.get_raw_tx().txid)?;
+        writeln!(f, "Deploy Script: {:#?}", self.inscription)?;
         writeln!(f, "Is Valid: {}", self.is_valid)?;
 
         // Additional information based on the fields of Brc20DeployTx
-        writeln!(f, "Max Supply: {}", self.max_supply)?;
-        writeln!(f, "Limit: {}", self.limit)?;
-        writeln!(f, "Decimals: {}", self.decimals)?;
+        writeln!(f, "Max Supply: {}", self.max)?;
+        writeln!(f, "Limit: {}", self.lim)?;
+        writeln!(f, "Decimals: {}", self.dec)?;
 
         Ok(())
     }

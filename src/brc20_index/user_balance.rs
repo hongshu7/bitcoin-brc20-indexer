@@ -1,19 +1,42 @@
-use super::{mint::Brc20MintTx, transfer::Brc20TransferTx};
+use super::{mint::Brc20Mint, transfer::Brc20Transfer, ToDocument};
 use bitcoin::OutPoint;
+use mongodb::bson::{doc, Document};
 use serde::Serialize;
 use std::{collections::HashMap, fmt};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UserBalance {
-    active_transfer_inscriptions: HashMap<OutPoint, Brc20TransferTx>,
-    transfer_sends: Vec<Brc20TransferTx>,
-    transfer_receives: Vec<Brc20TransferTx>,
-    mints: Vec<Brc20MintTx>,
+    pub address: String,
+    pub tick: String,
+    pub overall_balance: f64,
+    pub available_balance: f64,
+    pub transferable_balance: f64,
+    active_transfer_inscriptions: HashMap<OutPoint, Brc20Transfer>,
+    transfer_sends: Vec<Brc20Transfer>,
+    transfer_receives: Vec<Brc20Transfer>,
+    mints: Vec<Brc20Mint>,
+}
+
+impl ToDocument for UserBalance {
+    fn to_document(&self) -> Document {
+        doc! {
+            "address": self.address.to_string(),
+            "tick": self.tick.to_lowercase().clone(),
+            "overall_balance": self.overall_balance,
+            "available_balance": self.available_balance,
+            "transferable_balance": self.transferable_balance,
+        }
+    }
 }
 
 impl UserBalance {
-    pub fn new() -> Self {
+    pub fn new(address: String, tick: String) -> Self {
         UserBalance {
+            address,
+            tick,
+            overall_balance: 0.0,
+            available_balance: 0.0,
+            transferable_balance: 0.0,
             active_transfer_inscriptions: HashMap::new(),
             transfer_sends: Vec::new(),
             transfer_receives: Vec::new(),
@@ -28,11 +51,12 @@ impl UserBalance {
             .sum()
     }
 
-    pub fn add_transfer_inscription(&mut self, transfer_inscription: Brc20TransferTx) {
+    pub fn add_transfer_inscription(&mut self, transfer_inscription: Brc20Transfer) {
         self.active_transfer_inscriptions.insert(
             transfer_inscription.get_inscription_outpoint(),
             transfer_inscription.clone(),
         );
+        self.set_balances();
 
         // display user overall balance
         println!("User overall balance: {}", self.get_overall_balance());
@@ -45,16 +69,17 @@ impl UserBalance {
         );
     }
 
-    pub fn remove_inscription(&mut self, outpoint: &OutPoint) -> Option<Brc20TransferTx> {
+    pub fn remove_inscription(&mut self, outpoint: &OutPoint) -> Option<Brc20Transfer> {
         self.active_transfer_inscriptions.remove(&outpoint)
     }
 
-    pub fn add_mint_tx(&mut self, mint: Brc20MintTx) {
+    pub fn add_mint_tx(&mut self, mint: Brc20Mint) {
         self.mints.push(mint);
+        self.set_balances();
     }
 
     // get active transfer inscriptions
-    pub fn get_active_transfer_inscriptions(&self) -> &HashMap<OutPoint, Brc20TransferTx> {
+    pub fn get_active_transfer_inscriptions(&self) -> &HashMap<OutPoint, Brc20Transfer> {
         &self.active_transfer_inscriptions
     }
 
@@ -90,12 +115,20 @@ impl UserBalance {
             .sum()
     }
 
-    pub fn add_transfer_send(&mut self, transfer_send: Brc20TransferTx) {
+    pub fn add_transfer_send(&mut self, transfer_send: Brc20Transfer) {
         self.transfer_sends.push(transfer_send);
+        self.set_balances();
     }
 
-    pub fn add_transfer_receive(&mut self, transfer_receive: Brc20TransferTx) {
+    pub fn add_transfer_receive(&mut self, transfer_receive: Brc20Transfer) {
         self.transfer_receives.push(transfer_receive);
+        self.set_balances();
+    }
+
+    pub fn set_balances(&mut self) {
+        self.overall_balance = self.get_overall_balance();
+        self.available_balance = self.get_available_balance();
+        self.transferable_balance = self.get_transferable_balance();
     }
 }
 

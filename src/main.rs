@@ -1,38 +1,74 @@
 extern crate bitcoincore_rpc;
 extern crate serde_json;
+use std::env;
 
 use bitcoincore_rpc::{Auth, Client};
 use brc20_index::index_brc20;
+use consulrs::{client::{ConsulClient, ConsulClientSettingsBuilder}, kv};
 use dotenv::dotenv;
 use log::info;
-use std::env;
+use serde_json::Value;
 
 mod brc20_index;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Set the RUST_LOG environment variable to enable info logs
-    env::set_var("RUST_LOG", "info");
-
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logger and load env variables
-    env_logger::init();
     dotenv().ok();
+    env_logger::init();
+
+    let client = ConsulClient::new(
+        ConsulClientSettingsBuilder::default()
+            .address("http://localhost:8500")
+            .build()
+            .unwrap(),
+    )
+    .unwrap();
+    let mut res = kv::read(&client, "omnisat-api", None).await.unwrap();
+    let mykey: String = res
+        .response
+        .pop()
+        .unwrap()
+        .value
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let json_value: Value = serde_json::from_str(&mykey).unwrap();
+
+    let rpc_url = json_value
+        .get("btc_rpc_host").unwrap().as_str()
+        .unwrap_or_else(|| panic!("BTC_RPC_HOST IS NOT SET"));
+
+    let rpc_user = json_value
+        .get("btc_rpc_user").unwrap().as_str()
+        .unwrap_or_else(|| panic!("BTC_RPC_USER IS NOT SET"));
+
+    let rpc_password = json_value
+        .get("btc_rpc_pass").unwrap().as_str()
+        .unwrap_or_else(|| panic!("BTC_RPC_PASSWORD IS NOT SET"));
+
+    // println!("rpc_url: {}", rpc_url.to_string());
+    // println!("rpc_user: {}", rpc_user.to_string());
+    // println!("rpc_password: {}", rpc_password);
 
     // Retrieve the RPC url, user and password from environment variables
-    let rpc_url = env::var("RPC_URL").unwrap();
-    let rpc_user = env::var("RPC_USER").unwrap();
-    let rpc_password = env::var("RPC_PASSWORD").unwrap();
+    // let rpc_url = env::var("RPC_URL").unwrap();
+    // let rpc_user = env::var("RPC_USER").unwrap();
+    // let rpc_password = env::var("RPC_PASSWORD").unwrap();
 
     // Connect to Bitcoin Core RPC server
-    let rpc = Client::new(&rpc_url, Auth::UserPass(rpc_user, rpc_password))?;
+    let rpc = Client::new(
+        &rpc_url,
+        Auth::UserPass(rpc_user.to_string(), rpc_password.to_string()),
+    )?;
     info!("Connected to Bitcoin Core");
 
     // block height to start indexing from
-    // let start_block_height = 779832; // 779382 is starting block height for BRC20
-
-    let start_block_height = 795100;
+    // TODO: get this from the database
+    let start_block_height = 779832; // 779832 is starting block height for BRC20
 
     // LFG!
-    index_brc20(&rpc, start_block_height)?;
+    index_brc20(&rpc, start_block_height).await?;
 
     Ok(())
 }
