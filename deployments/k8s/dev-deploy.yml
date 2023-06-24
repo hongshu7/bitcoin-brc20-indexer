@@ -27,3 +27,6 @@ spec:
             - name: MONGO_DB_NAME
               valueFrom: 
               value: 'omnisat-srv'
+            - name: RUST_LOG
+              valueFrom: 
+              value: 'info'

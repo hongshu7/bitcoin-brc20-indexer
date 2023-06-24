@@ -301,9 +301,9 @@ pub async fn index_brc20(
     let mongo_host = json_value
         .get("mongo_rc")
         .unwrap_or_else(|| panic!("MONGO_RC IS NOT SET"));
-    let mongo_host = &mongo_host[0].as_str().unwrap();
+    let mongo_host = &mongo_host[0].as_str().unwrap(); //This uses the mongo host from consul
+    // let mongo_host = "localhost"; // This uses localhost as mongo host
 
-println!("MONGO_HOST: {}", mongo_host);
     // Instantiate a new `Brc20Index` struct.
     let mut brc20_index = Brc20Index::new();
     let connection_string = "mongodb://".to_owned()+&mongo_host+":27017";
