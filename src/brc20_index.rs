@@ -11,15 +11,17 @@ use self::{
     },
 };
 use bitcoin::{Address, OutPoint};
-use bitcoincore_rpc::bitcoincore_rpc_json::{
+use bitcoincore_rpc::{bitcoincore_rpc_json::{
     GetRawTransactionResult, GetRawTransactionResultVin, GetRawTransactionResultVout,
     GetRawTransactionResultVoutScriptPubKey,
-};
+}, jsonrpc::client};
 use bitcoincore_rpc::{self, Client, RpcApi};
+use consulrs::{client::{ConsulClient, ConsulClientSettingsBuilder}, kv};
 use log::{error, info};
 use mongodb::bson::{doc, Document};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs::DirBuilder, thread::sleep, time::Duration};
+use serde_json::Value;
+use std::{collections::HashMap, fs::DirBuilder, thread::sleep, time::Duration, env};
 
 mod brc20_ticker;
 pub mod consts;
@@ -275,14 +277,41 @@ pub async fn index_brc20(
     rpc: &Client,
     start_block_height: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    //TODO: This is connecting to Consul to get the MONGO_HOST, this should be refactorered to get ALL 
+    // the variables we need from consul in one place in the codebase and set CONSTANT variables for these. 
+    let consul_host = env::var("CONSUL_HOST").unwrap();
+    let client = ConsulClient::new(
+        ConsulClientSettingsBuilder::default()
+            .address(consul_host)
+            .build()
+            .unwrap(),
+    )
+    .unwrap();
+    let mut res = kv::read(&client, "omnisat-api", None).await.unwrap();
+    let mykey: String = res
+        .response
+        .pop()
+        .unwrap()
+        .value
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let json_value: Value = serde_json::from_str(&mykey).unwrap();
+
+    let mongo_host = json_value
+        .get("mongo_rc")
+        .unwrap_or_else(|| panic!("MONGO_RC IS NOT SET"));
+    let mongo_host = &mongo_host[0].as_str().unwrap();
+
+println!("MONGO_HOST: {}", mongo_host);
     // Instantiate a new `Brc20Index` struct.
     let mut brc20_index = Brc20Index::new();
-
-    let connection_string = "mongodb://localhost:27017";
-    let db_name = "omnisat";
+    let connection_string = "mongodb://".to_owned()+&mongo_host+":27017";
+    // Get the mongo database name from environment variable
+    let db_name = env::var("MONGO_DB_NAME").unwrap();
 
     // This will return a future that you can await directly
-    let client = MongoClient::new(connection_string, db_name).await?;
+    let client = MongoClient::new(&connection_string, &db_name).await?;
 
     let mut current_block_height = start_block_height;
     loop {

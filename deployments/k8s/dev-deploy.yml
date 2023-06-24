@@ -24,19 +24,6 @@ spec:
             - name: CONSUL_HOST
               valueFrom: 
               value: 'http://consul-server:8500'
-              # CONSUL_HOST
-            # - name: RPC_USER
-            #   valueFrom: 
-            #     secretKeyRef: 
-            #       name: omnisat-indexer-rs-secret
-            #       key: btc_rpc_user
-            # - name: RPC_PASSWORD
-            #   valueFrom: 
-            #     secretKeyRef: 
-            #       name: omnisat-indexer-rs-secret
-            #       key: btc_rpc_password
-            # - name: RPC_URL
-            #   valueFrom: 
-            #     secretKeyRef: 
-            #       name: omnisat-indexer-rs-secret
-            #       key: btc_rpc_host
+            - name: MONGO_DB_NAME
+              valueFrom: 
+              value: 'omnisat-srv'
