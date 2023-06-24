@@ -3,7 +3,6 @@ use super::{
     consts,
     invalid_brc20::{InvalidBrc20Tx, InvalidBrc20TxMap},
     mongo::MongoClient,
-    user_balance::UserBalance,
     utils::convert_to_float,
     Brc20Index, Brc20Inscription, ToDocument,
 };
