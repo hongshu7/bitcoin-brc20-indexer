@@ -138,7 +138,9 @@ impl Brc20Mint {
                 .get_mut(&self.inscription.tick.to_lowercase())
                 .unwrap();
 
-            ticker.add_mint_to_ticker(self.clone(), mongo_client).await;
+            ticker
+                .add_mint_to_ticker(self.clone(), mongo_client)
+                .await?;
         }
         // Return the updated mint transaction, which might be valid or invalid
         Ok(self)

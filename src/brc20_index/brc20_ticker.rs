@@ -135,7 +135,7 @@ impl Brc20Ticker {
         if let Some(balance) = self.balances.get_mut(&owner) {
             balance.add_mint_tx(mint.clone());
 
-            // TODO: Verify user balance exists in mongodb else panic
+            // TODO: Verify user balance exists in mongodb
 
             // Update user overall balance and available for the receiver in MongoDB
             mongo_client
@@ -183,11 +183,6 @@ impl Brc20Ticker {
         }
 
         Ok(())
-    }
-
-    // get balances
-    pub fn get_balances(&self) -> &HashMap<Address, UserBalance> {
-        &self.balances
     }
 
     pub fn get_user_balance(&self, address: &Address) -> Option<&UserBalance> {

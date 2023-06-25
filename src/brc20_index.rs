@@ -5,23 +5,23 @@ use self::{
     mint::handle_mint_operation,
     mongo::MongoClient,
     transfer::{handle_transfer_operation, Brc20Transfer},
-    utils::{
-        extract_and_process_witness_data, get_owner_of_vout, get_witness_data_from_raw_tx,
-        write_tickers_to_file,
-    },
+    utils::{extract_and_process_witness_data, get_owner_of_vout, get_witness_data_from_raw_tx},
 };
 use bitcoin::{Address, OutPoint};
-use bitcoincore_rpc::{bitcoincore_rpc_json::{
+use bitcoincore_rpc::bitcoincore_rpc_json::{
     GetRawTransactionResult, GetRawTransactionResultVin, GetRawTransactionResultVout,
     GetRawTransactionResultVoutScriptPubKey,
-}, jsonrpc::client};
+};
 use bitcoincore_rpc::{self, Client, RpcApi};
-use consulrs::{client::{ConsulClient, ConsulClientSettingsBuilder}, kv};
+use consulrs::{
+    client::{ConsulClient, ConsulClientSettingsBuilder},
+    kv,
+};
 use log::{error, info};
 use mongodb::bson::{doc, Document};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::HashMap, fs::DirBuilder, thread::sleep, time::Duration, env};
+use std::{collections::HashMap, env, thread::sleep, time::Duration};
 
 mod brc20_ticker;
 pub mod consts;
@@ -92,10 +92,6 @@ impl Brc20Index {
             invalid_tx_map: InvalidBrc20TxMap::new(),
             active_transfer_inscriptions: HashMap::new(),
         }
-    }
-
-    pub fn dump_invalid_txs_to_file(&self, path: &str) -> std::io::Result<()> {
-        self.invalid_tx_map.dump_to_file(path)
     }
 
     pub async fn check_for_transfer_send(
@@ -277,8 +273,8 @@ pub async fn index_brc20(
     rpc: &Client,
     start_block_height: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    //TODO: This is connecting to Consul to get the MONGO_HOST, this should be refactorered to get ALL 
-    // the variables we need from consul in one place in the codebase and set CONSTANT variables for these. 
+    //TODO: This is connecting to Consul to get the MONGO_HOST, this should be refactorered to get ALL
+    // the variables we need from consul in one place in the codebase and set CONSTANT variables for these.
     let consul_host = env::var("CONSUL_HOST").unwrap();
     let client = ConsulClient::new(
         ConsulClientSettingsBuilder::default()
@@ -302,11 +298,11 @@ pub async fn index_brc20(
         .get("mongo_rc")
         .unwrap_or_else(|| panic!("MONGO_RC IS NOT SET"));
     let mongo_host = &mongo_host[0].as_str().unwrap(); //This uses the mongo host from consul
-    // let mongo_host = "localhost"; // This uses localhost as mongo host
+                                                       // let mongo_host = "localhost"; // This uses localhost as mongo host
 
     // Instantiate a new `Brc20Index` struct.
     let mut brc20_index = Brc20Index::new();
-    let connection_string = "mongodb://".to_owned()+&mongo_host+":27017";
+    let connection_string = "mongodb://".to_owned() + &mongo_host + ":27017";
     // Get the mongo database name from environment variable
     let db_name = env::var("MONGO_DB_NAME").unwrap();
 
@@ -413,32 +409,7 @@ pub async fn index_brc20(
             } //
               // TODO: save to MongoDB this block height and timestamp
         }
-
-        // stop after reaching a certain block height
-        if current_block_height > 795490 {
-            break;
-        }
     }
-
-    //Log Tickers to file
-    let result = write_tickers_to_file(&brc20_index.tickers, "tickers");
-    match result {
-        Ok(()) => println!("Successfully wrote tickers to files."),
-        Err(e) => println!("An error occurred while writing tickers to files: {:?}", e),
-    }
-
-    // Log Invalids to file
-    DirBuilder::new().recursive(true).create("invalid_txs")?;
-    let result = brc20_index.dump_invalid_txs_to_file("invalid_txs/invalid_txs.json");
-    match result {
-        Ok(()) => println!("Successfully dumped invalid transactions to file."),
-        Err(e) => println!(
-            "An error occurred while dumping invalid transactions to file: {:?}",
-            e
-        ),
-    }
-
-    Ok(())
 }
 
 impl ToDocument for GetRawTransactionResult {
