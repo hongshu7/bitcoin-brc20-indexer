@@ -4,7 +4,10 @@ use std::env;
 
 use bitcoincore_rpc::{Auth, Client};
 use brc20_index::index_brc20;
-use consulrs::{client::{ConsulClient, ConsulClientSettingsBuilder}, kv};
+use consulrs::{
+    client::{ConsulClient, ConsulClientSettingsBuilder},
+    kv,
+};
 use dotenv::dotenv;
 use log::info;
 use serde_json::Value;
@@ -36,15 +39,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let json_value: Value = serde_json::from_str(&mykey).unwrap();
 
     let rpc_url = json_value
-        .get("btc_rpc_host").unwrap().as_str()
+        .get("btc_rpc_host")
+        .unwrap()
+        .as_str()
         .unwrap_or_else(|| panic!("BTC_RPC_HOST IS NOT SET"));
 
     let rpc_user = json_value
-        .get("btc_rpc_user").unwrap().as_str()
+        .get("btc_rpc_user")
+        .unwrap()
+        .as_str()
         .unwrap_or_else(|| panic!("BTC_RPC_USER IS NOT SET"));
 
     let rpc_password = json_value
-        .get("btc_rpc_pass").unwrap().as_str()
+        .get("btc_rpc_pass")
+        .unwrap()
+        .as_str()
         .unwrap_or_else(|| panic!("BTC_RPC_PASSWORD IS NOT SET"));
 
     // Retrieve the RPC url, user and password from environment variables

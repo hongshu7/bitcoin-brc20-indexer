@@ -237,7 +237,7 @@ impl MongoClient {
         ticker: &str,
         amount_to_add: f64,
     ) -> Result<(), mongodb::error::Error> {
-        let db = self.client.database("omnisat-srv");
+        let db = self.client.database(&self.db_name);
         let collection = db.collection::<bson::Document>(consts::COLLECTION_TICKERS);
 
         // Retrieve the brc20ticker document
