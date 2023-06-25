@@ -22,7 +22,8 @@ COPY ./Cargo.toml ./Cargo.toml
 COPY ./src ./src
 
 # Build for release. Use the musl target for static compilation
-RUN cargo build --release --target x86_64-unknown-linux-musl
+RUN cargo build --release
+RUN cargo install --target x86_64-unknown-linux-musl --path .
 
 ################
 # Runner
@@ -32,7 +33,7 @@ RUN cargo build --release --target x86_64-unknown-linux-musl
 FROM scratch
 
 # copy the build artifact from the build stage
-COPY --from=builder /usr/src/omnisat-indexer-rs/target/x86_64-unknown-linux-musl/release/btc-indexer .
+COPY --from=builder /usr/local/cargo/bin/btc-indexer .
 
 # set the startup command to run your binary
 CMD ["./btc-indexer"]
