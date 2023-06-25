@@ -6,6 +6,9 @@
 FROM rust:1.70 as builder
 WORKDIR /usr/src
 
+# Install cross, a cargo wrapper for cross-compilation
+RUN cargo install cross
+
 # Install musl-tools for static compilation
 RUN apt-get update && apt-get install -y libssl-dev musl-tools pkg-config
 RUN rustup target add x86_64-unknown-linux-musl
