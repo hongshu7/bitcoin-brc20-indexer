@@ -5,8 +5,13 @@ COPY src ./src
 COPY Cargo.toml .
 COPY entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/entrypoint.sh
+
 CMD ["entrypoint.sh"]
 # CMD sleep 30000
+
+###############################################################
+###############################################################
+###############################################################
 
 # To deploy, run `cross build --release --target x86_64-unknown-linux-musl` locally
 # bumpversion and merge to dev
