@@ -14,15 +14,15 @@ WORKDIR /usr/src/omnisat-indexer-rs
 COPY ./Cargo.lock ./Cargo.lock
 COPY ./Cargo.toml ./Cargo.toml
 
-# This build step will cache your dependencies
-RUN cargo build --release
-RUN rm src/*.rs
+# # This build step will cache your dependencies
+# RUN cargo build --release
+# RUN rm src/*.rs
 
 # Copy your source tree
 COPY ./src ./src
 
 # Build for release.
-RUN rm ./target/release/deps/omnisat-indexer-rs*
+# RUN rm ./target/release/deps/omnisat-indexer-rs*
 RUN cargo build --release
 
 ################
