@@ -7,7 +7,7 @@ FROM rust:1.70 as builder
 WORKDIR /usr/src
 
 # Install musl-tools for static compilation
-RUN apt-get update && apt-get install -y musl-tools
+RUN apt-get update && apt-get install -y libssl-dev musl-tools
 RUN rustup target add x86_64-unknown-linux-musl
 
 # Create a new empty shell project
