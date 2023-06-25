@@ -298,8 +298,11 @@ pub async fn index_brc20(
         .get("mongo_rc")
         .unwrap_or_else(|| panic!("MONGO_RC IS NOT SET"));
 
-    let mongo_connection_str = format!("mongodb://{}:{}:{}/omnisat?replicaSet=rs0", mongo_host[0], mongo_host[1], mongo_host[2]);
-    // let mongo_connection_str = "http://localhost:27017"; // This uses localhost as mongo host
+    let mongo_connection_str = format!(
+        "mongodb://{}:{}:{}/omnisat?replicaSet=rs0",
+        mongo_host[0], mongo_host[1], mongo_host[2]
+    );
+    // let mongo_connection_str = "mongodb://localhost:27017"; // This uses localhost as mongo host
 
     // Instantiate a new `Brc20Index` struct.
     let mut brc20_index = Brc20Index::new();
