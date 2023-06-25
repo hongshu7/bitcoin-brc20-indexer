@@ -300,7 +300,9 @@ pub async fn index_brc20(
 
     let mongo_connection_str = format!(
         "mongodb://{}:27017,{}:27017,{}:27017/omnisat?replicaSet=rs0",
-        mongo_host[0], mongo_host[1], mongo_host[2]
+        mongo_host[0].as_str().unwrap(),
+        mongo_host[1].as_str().unwrap(), 
+        mongo_host[2].as_str().unwrap(),
     );
     // let mongo_connection_str = "mongodb://localhost:27017"; // This uses localhost as mongo host
 

@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: omnisat-indexer-rs
-          image: gcr.io/pineappleworkshop/omnisat-indexer-rs:0.0.23
+          image: gcr.io/pineappleworkshop/omnisat-indexer-rs:0.0.24
           env:
             - name: ENV
               value: 'dev'
