@@ -1,6 +1,6 @@
 service := omnisat-indexer-rs
 port := 3445
-version := 0.0.18
+version := 0.0.19
 docker-org := pineappleworkshop
 docker-registry := gcr.io
 docker-image := pineappleworkshop/${service}:${version}
