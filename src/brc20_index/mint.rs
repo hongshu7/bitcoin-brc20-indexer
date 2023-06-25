@@ -76,7 +76,7 @@ impl Brc20Mint {
         invalid_tx_map: &'a mut InvalidBrc20TxMap,
         mongo_client: &MongoClient,
     ) -> Result<Brc20Mint, Box<dyn std::error::Error>> {
-        let mut is_valid = true;
+        let mut is_valid = false;
         let mut reason = String::new();
 
         if let Some(ticker) = ticker_map.get(&self.inscription.tick.to_lowercase()) {
@@ -93,28 +93,26 @@ impl Brc20Mint {
                 Ok(amount) => {
                     // Check if the amount is greater than the limit
                     if amount > limit {
-                        is_valid = false;
                         reason = "Mint amount exceeds limit".to_string();
                     // Check if total minted is already greater than or equal to max supply
                     } else if total_minted >= max_supply {
-                        is_valid = false;
                         reason = "Total minted is already at or exceeds max supply".to_string();
                     // Check if the total minted amount + requested mint amount exceeds the max supply
                     } else if total_minted + amount > max_supply {
+                        is_valid = true;
                         // Adjust the mint amount to mint the remaining tokens
                         let remaining_amount = max_supply - total_minted;
                         self.amt = remaining_amount;
                     } else {
+                        is_valid = true;
                         self.amt = amount;
                     }
                 }
                 Err(e) => {
-                    is_valid = false;
                     reason = e.to_string();
                 }
             }
         } else {
-            is_valid = false;
             reason = "Ticker symbol does not exist".to_string();
         }
 
@@ -179,6 +177,8 @@ pub async fn handle_mint_operation(
         info!("Mint: {:?}", validated_mint_tx.get_mint());
         info!("TO Address: {:?}", validated_mint_tx.to);
 
+        let amount = validated_mint_tx.get_amount();
+
         //---------------MONGO DOB-----------------//
         // Add the mint transaction to the mongo database
         mongo_client
@@ -194,7 +194,6 @@ pub async fn handle_mint_operation(
             )
             .await?;
 
-        let amount = validated_mint_tx.get_amount();
         if let Some(mut ticker_doc) = ticker_doc_from_mongo {
             // get ticker from ticker map
             let ticker_from_map = brc20_index
@@ -207,7 +206,7 @@ pub async fn handle_mint_operation(
                     ticker_doc.insert("total_minted", Bson::Double(val + amount));
                 }
             }
-            println!("debug #1");
+
             let update_doc = doc! {
                 "$set": {
                     "total_minted": ticker_doc.get("total_minted").unwrap_or_else(|| &Bson::Double(0.0)),

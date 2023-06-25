@@ -185,10 +185,7 @@ impl Brc20Deploy {
                 }
                 Err(_) => Err("Max field must be a valid number.".to_string()),
             },
-            None => {
-                error!("Max field is missing.");
-                Err("Max field is missing.".to_string())
-            }
+            None => Err("Max field is missing.".to_string()),
         }
     }
 
@@ -260,22 +257,23 @@ pub async fn handle_deploy_operation(
         mongo_client
             .insert_document(consts::COLLECTION_TICKERS, ticker.to_document())
             .await?;
+
+        // Insert the valid deploy transaction into MongoDB
+        mongo_client
+            .insert_document(
+                consts::COLLECTION_DEPLOYS,
+                validated_deploy_tx.to_document(),
+            )
+            .await?;
     } else {
         error!(
             "Invalid deploy: {:?}",
             validated_deploy_tx.get_deploy_script()
         );
-    }
 
-    // Insert the deploy transaction into MongoDB whether valid or not
-    // do we want to store invalid deploys with complete tx data?
-    // we have a InvalidTx struct that includes txid, inscription, and reason
-    mongo_client
-        .insert_document(
-            consts::COLLECTION_DEPLOYS,
-            validated_deploy_tx.to_document(),
-        )
-        .await?;
+        //do we want to store the deploy struct even if it is invalid?
+        // we already have inserted invaliid tx into mongodb
+    }
 
     Ok(())
 }

@@ -23,13 +23,11 @@ pub struct Brc20Ticker {
 impl ToDocument for Brc20Ticker {
     fn to_document(&self) -> Document {
         doc! {
-            // "_id": self.id.clone(),
             "tick": self.get_ticker().clone(),
             "limit": self.limit,
             "max_supply": self.max_supply,
             "decimals": self.decimals as i64,
             "total_minted": self.total_minted,
-            // "created_at": self.created_at.clone(),
         }
     }
 }
@@ -125,7 +123,11 @@ impl Brc20Ticker {
 
     // Adds a mint transaction to the owner's balance. If the owner's balance doesn't exist yet, it
     // creates a new one. Also updates the total minted tokens for this Brc20Ticker.
-    pub async fn add_mint_to_ticker(&mut self, mint: Brc20Mint, mongo_client: &MongoClient) {
+    pub async fn add_mint_to_ticker(
+        &mut self,
+        mint: Brc20Mint,
+        mongo_client: &MongoClient,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let owner = mint.to.clone();
         let mint_amount = mint.get_amount();
 
@@ -142,8 +144,7 @@ impl Brc20Ticker {
                     mint_amount,
                     &self.get_ticker(),
                 )
-                .await
-                .unwrap();
+                .await?;
         } else {
             //if user balance doesn not exist, create a new one
             let mut user_balance = UserBalance::new(mint.to.to_string(), self.get_ticker().clone());
@@ -151,9 +152,9 @@ impl Brc20Ticker {
             self.balances.insert(owner.clone(), user_balance.clone());
 
             // Insert the UserBalance into MongoDB
-            let _ = mongo_client
+            mongo_client
                 .insert_document(consts::COLLECTION_USER_BALANCES, user_balance.to_document())
-                .await;
+                .await?;
         }
         // update total minted tokens for ticker
         self.total_minted += mint.amt;
@@ -162,8 +163,7 @@ impl Brc20Ticker {
         // Update total minted tokens for this ticker in MongoDB
         mongo_client
             .update_brc20_ticker_total_minted(&self.get_ticker(), mint_amount)
-            .await
-            .unwrap();
+            .await?;
 
         //--------------//
         // log to console
@@ -181,6 +181,8 @@ impl Brc20Ticker {
                 self.get_total_supply()
             );
         }
+
+        Ok(())
     }
 
     // get balances
