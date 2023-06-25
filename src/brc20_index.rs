@@ -168,7 +168,7 @@ impl Brc20Index {
                         Some(*acc)
                     })
                     .position(|value| value >= input_value_sum)
-                    .unwrap_or_else(|| transaction.output.len() - 1)
+                    .unwrap_or(transaction.output.len() - 1)
             } else {
                 0
             };
@@ -297,17 +297,18 @@ pub async fn index_brc20(
     let mongo_host = json_value
         .get("mongo_rc")
         .unwrap_or_else(|| panic!("MONGO_RC IS NOT SET"));
-    let mongo_host = &mongo_host[0].as_str().unwrap(); //This uses the mongo host from consul
-                                                       // let mongo_host = "localhost"; // This uses localhost as mongo host
+
+    let mongo_connection_str = format!("mongodb://{}:{}:{}/omnisat?replicaSet=rs0", mongo_host[0], mongo_host[1], mongo_host[2]);
+    // let mongo_connection_str = "http://localhost:27017"; // This uses localhost as mongo host
 
     // Instantiate a new `Brc20Index` struct.
     let mut brc20_index = Brc20Index::new();
-    let connection_string = "mongodb://".to_owned() + &mongo_host + ":27017";
+
     // Get the mongo database name from environment variable
     let db_name = env::var("MONGO_DB_NAME").unwrap();
 
     // This will return a future that you can await directly
-    let client = MongoClient::new(&connection_string, &db_name).await?;
+    let client = MongoClient::new(&mongo_connection_str, &db_name).await?;
 
     let mut current_block_height = start_block_height;
     loop {
