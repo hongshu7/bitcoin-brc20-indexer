@@ -2,7 +2,7 @@ use super::{Brc20Inscription, ToDocument};
 use bitcoin::Txid;
 use mongodb::bson::{doc, Document};
 use serde::Serialize;
-use std::{collections::HashMap, fmt, fs::File, io::Write};
+use std::{collections::HashMap, fmt};
 
 // InvalidBrc20Tx represents an invalid BRC20 transaction,
 // storing the id of the transaction, the faulty inscription and the reason why it's invalid.
@@ -52,20 +52,6 @@ impl InvalidBrc20TxMap {
         InvalidBrc20TxMap {
             map: HashMap::new(),
         }
-    }
-
-    // writes the invalid transactions map to a file at the provided path.
-    // It converts the map to JSON before writing.
-    pub fn dump_to_file(&self, path: &str) -> std::io::Result<()> {
-        let mut file = File::create(path)?;
-
-        // Convert the invalid transactions map to JSON
-        let json = serde_json::to_string_pretty(&self.map)?;
-
-        // Write to the file
-        file.write_all(json.as_bytes())?;
-
-        Ok(())
     }
 
     // adds an invalid transaction to the map.

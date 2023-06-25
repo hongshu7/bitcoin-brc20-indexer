@@ -70,7 +70,7 @@ workflows:
     jobs:
       - gcp-gcr/build-and-push-image:
           image: omnisat-indexer-rs
-          tag: 0.0.15
+          tag: 0.0.16
           registry-url: gcr.io
           context: omnisat-indexer-rs-dev
           filters:
@@ -82,7 +82,7 @@ workflows:
           container: omnisat-indexer-rs
           deployment: omnisat-indexer-rs
           image: gcr.io/pineappleworkshop/omnisat-indexer-rs
-          tag: 0.0.15
+          tag: 0.0.16
           namespace: omnisat
           filters:
             branches:
@@ -98,7 +98,7 @@ workflows:
           container: omnisat-indexer-rs
           deployment: omnisat-indexer-rs
           image: gcr.io/pineappleworkshop/omnisat-indexer-rs
-          tag: 0.0.15
+          tag: 0.0.16
           namespace: omnisat
           context: omnisat-indexer-rs-prod
           filters:

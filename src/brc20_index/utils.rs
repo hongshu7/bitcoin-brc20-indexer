@@ -3,11 +3,7 @@ use bitcoin::{Address, Network, TxIn};
 use bitcoincore_rpc::{bitcoincore_rpc_json::GetRawTransactionResult, Client, RpcApi};
 use log::error;
 use serde::Serialize;
-use std::{
-    collections::HashMap,
-    fs::{DirBuilder, File},
-    io::Write,
-};
+use std::collections::HashMap;
 
 pub fn get_witness_data_from_raw_tx(
     raw_tx_info: &GetRawTransactionResult,
@@ -165,48 +161,6 @@ struct BalanceInfo {
 struct TickerWithBalances {
     ticker: Brc20Ticker,
     balances: HashMap<String, BalanceInfo>,
-}
-
-pub fn write_tickers_to_file(
-    tickers: &HashMap<String, Brc20Ticker>,
-    directory: &str,
-) -> std::io::Result<()> {
-    let mut dir_builder = DirBuilder::new();
-    dir_builder.recursive(true); // This will create parent directories if they don't exist
-    dir_builder.create(directory)?; // Create the directory if it doesn't exist
-
-    for (ticker_name, ticker) in tickers {
-        let filename = format!("{}/{}.json", directory, ticker_name); // create a unique filename
-        let mut file = File::create(&filename)?; // create a new file for each ticker
-
-        // map each balance to a BalanceInfo
-        let balances: HashMap<String, BalanceInfo> = ticker
-            .get_balances()
-            .iter()
-            .map(|(address, user_balance)| {
-                (
-                    address.to_string(),
-                    BalanceInfo {
-                        overall_balance: user_balance.get_overall_balance(),
-                        available_balance: user_balance.get_available_balance(),
-                        transferable_balance: user_balance.get_transferable_balance(),
-                    },
-                )
-            })
-            .collect();
-
-        // construct a TickerWithBalances
-        let ticker_with_balances = TickerWithBalances {
-            ticker: ticker.clone(),
-            balances,
-        };
-
-        // serialize and write the TickerWithBalances
-        let serialized = serde_json::to_string_pretty(&ticker_with_balances)?;
-        writeln!(file, "{}", serialized)?;
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
