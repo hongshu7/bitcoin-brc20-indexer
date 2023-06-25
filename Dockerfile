@@ -6,8 +6,8 @@
 FROM rust:1.70-alpine as builder
 WORKDIR /usr/src
 
-# # Install cross, a cargo wrapper for cross-compilation
-# RUN cargo install cross
+# Install cross, a cargo wrapper for cross-compilation
+RUN cargo install cross
 
 # Install musl-tools for static compilation
 RUN apt-get update && apt-get install -y libssl-dev musl-tools pkg-config
@@ -26,7 +26,8 @@ COPY ./src ./src
 
 # Build for release. Use the musl target for static compilation
 RUN cargo build --release
-RUN cargo install --target x86_64-unknown-linux-musl --path .
+# RUN cargo install --target x86_64-unknown-linux-musl --path .
+RUN cross build --target x86_64-unknown-linux-musl
 
 ################
 # Runner
