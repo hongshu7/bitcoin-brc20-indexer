@@ -33,7 +33,7 @@ RUN cargo build --release
 FROM scratch
 
 # copy the build artifact from the build stage
-COPY --from=builder /usr/src/omnisat-indexer-rs/target/release/omnisat-indexer-rs .
+COPY --from=builder /usr/src/omnisat-indexer-rs/target/release/btc-indexer .
 
 # set the startup command to run your binary
-CMD ["./omnisat-indexer-rs"]
+CMD ["./btc-indexer"]
