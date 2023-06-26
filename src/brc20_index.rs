@@ -5,9 +5,10 @@ use self::{
     mint::handle_mint_operation,
     mongo::MongoClient,
     transfer::{handle_transfer_operation, Brc20Transfer},
+    user_balance::UserBalanceEntryType,
     utils::{extract_and_process_witness_data, get_owner_of_vout, get_witness_data_from_raw_tx},
 };
-use bitcoin::{Address, OutPoint};
+use bitcoin::{block, Address, OutPoint};
 use bitcoincore_rpc::bitcoincore_rpc_json::{
     GetRawTransactionResult, GetRawTransactionResultVin, GetRawTransactionResultVout,
     GetRawTransactionResultVoutScriptPubKey,
@@ -28,7 +29,7 @@ pub mod consts;
 mod deploy;
 mod invalid_brc20;
 mod mint;
-mod mongo;
+pub mod mongo;
 mod transfer;
 pub mod user_balance;
 mod utils;
@@ -99,6 +100,7 @@ impl Brc20Index {
         mongo_client: &MongoClient,
         rpc: &Client,
         raw_tx_info: &GetRawTransactionResult,
+        block_height: u64,
     ) -> Result<(), anyhow::Error> {
         let transaction = raw_tx_info.transaction()?;
 
@@ -205,6 +207,28 @@ impl Brc20Index {
                 .set_receiver(receiver_address.clone())
                 .set_transfer_tx(raw_tx_info.clone());
 
+            // Update user overall balance and available for the from address(sender) in MongoDB
+            mongo_client
+                .insert_user_balance_entry(
+                    &from.to_string(),
+                    amount,
+                    &ticker_symbol,
+                    block_height,
+                    UserBalanceEntryType::Send,
+                )
+                .await?;
+
+            // Update user overall balance and available for the to address(receiver) in MongoDB
+            mongo_client
+                .insert_user_balance_entry(
+                    &receiver_address.to_string(),
+                    amount,
+                    &ticker_symbol,
+                    block_height,
+                    UserBalanceEntryType::Receive,
+                )
+                .await?;
+
             // Update user balances
             brc20_ticker
                 .update_transfer_receives(receiver_address.clone(), brc20_transfer_tx.clone());
@@ -271,49 +295,11 @@ impl Brc20Index {
 
 pub async fn index_brc20(
     rpc: &Client,
+    mongo_client: &MongoClient,
     start_block_height: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    //TODO: This is connecting to Consul to get the MONGO_HOST, this should be refactorered to get ALL
-    // the variables we need from consul in one place in the codebase and set CONSTANT variables for these.
-    let consul_host = env::var("CONSUL_HOST").unwrap();
-    let client = ConsulClient::new(
-        ConsulClientSettingsBuilder::default()
-            .address(consul_host)
-            .build()
-            .unwrap(),
-    )
-    .unwrap();
-    let mut res = kv::read(&client, "omnisat-api", None).await.unwrap();
-    let mykey: String = res
-        .response
-        .pop()
-        .unwrap()
-        .value
-        .unwrap()
-        .try_into()
-        .unwrap();
-    let json_value: Value = serde_json::from_str(&mykey).unwrap();
-
-    let mongo_host = json_value
-        .get("mongo_rc")
-        .unwrap_or_else(|| panic!("MONGO_RC IS NOT SET"));
-
-    let mongo_connection_str = format!(
-        "mongodb://{}:27017,{}:27017,{}:27017/omnisat?replicaSet=rs0",
-        mongo_host[0].as_str().unwrap(),
-        mongo_host[1].as_str().unwrap(),
-        mongo_host[2].as_str().unwrap(),
-    );
-    // let mongo_connection_str = "mongodb://localhost:27017"; // This uses localhost as mongo host
-
     // Instantiate a new `Brc20Index` struct.
     let mut brc20_index = Brc20Index::new();
-
-    // Get the mongo database name from environment variable
-    let db_name = env::var("MONGO_DB_NAME").unwrap();
-
-    // This will return a future that you can await directly
-    let client = MongoClient::new(&mongo_connection_str, &db_name).await?;
 
     let mut current_block_height = start_block_height;
     loop {
@@ -368,7 +354,7 @@ pub async fn index_brc20(
                                     match &inscription.op[..] {
                                         "deploy" => {
                                             match handle_deploy_operation(
-                                                &client,
+                                                mongo_client,
                                                 inscription,
                                                 raw_tx.clone(),
                                                 owner.clone(),
@@ -389,7 +375,7 @@ pub async fn index_brc20(
                                         }
                                         "mint" => {
                                             match handle_mint_operation(
-                                                &client,
+                                                mongo_client,
                                                 current_block_height,
                                                 tx_height,
                                                 owner,
@@ -410,7 +396,7 @@ pub async fn index_brc20(
                                         }
                                         "transfer" => {
                                             match handle_transfer_operation(
-                                                &client,
+                                                mongo_client,
                                                 current_block_height,
                                                 tx_height,
                                                 inscription,
@@ -438,7 +424,12 @@ pub async fn index_brc20(
                                     // No inscription found
                                     // check if the tx is sending a transfer inscription
                                     match brc20_index
-                                        .check_for_transfer_send(&client, &rpc, &raw_tx)
+                                        .check_for_transfer_send(
+                                            mongo_client,
+                                            &rpc,
+                                            &raw_tx,
+                                            current_block_height.into(),
+                                        )
                                         .await
                                     {
                                         Ok(_) => (),
@@ -450,6 +441,18 @@ pub async fn index_brc20(
                             }
                             // Increment the tx height
                             tx_height += 1;
+                        }
+
+                        // After successfully processing the block, store the current_block_height
+                        match mongo_client
+                            .store_completed_block(current_block_height.into())
+                            .await
+                        {
+                            Ok(_) => (),
+                            Err(e) => {
+                                error!("Failed to store last processed block height: {:?}", e);
+                                // what do we do if the height can't be stored?
+                            }
                         }
 
                         // Increment the block height

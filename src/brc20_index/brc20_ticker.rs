@@ -1,9 +1,14 @@
 use super::{
-    consts, deploy::Brc20Deploy, mint::Brc20Mint, mongo::MongoClient, transfer::Brc20Transfer,
-    user_balance::UserBalance, ToDocument,
+    consts,
+    deploy::Brc20Deploy,
+    mint::Brc20Mint,
+    mongo::MongoClient,
+    transfer::Brc20Transfer,
+    user_balance::{UserBalance, UserBalanceEntryType},
+    ToDocument,
 };
 use bitcoin::{Address, OutPoint};
-use mongodb::bson::{doc, Document};
+use mongodb::bson::{doc, Bson, DateTime, Document};
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -28,6 +33,8 @@ impl ToDocument for Brc20Ticker {
             "max_supply": self.max_supply,
             "decimals": self.decimals as i64,
             "total_minted": self.total_minted,
+            "block_height": self.deploy.block_height,
+            "created_at": Bson::DateTime(DateTime::now())
         }
     }
 }
@@ -131,12 +138,22 @@ impl Brc20Ticker {
         let owner = mint.to.clone();
         let mint_amount = mint.get_amount();
 
+        // insert user balance entry into MongoDB
+        mongo_client
+            .insert_user_balance_entry(
+                &owner.to_string(),
+                mint_amount,
+                &self.get_ticker(),
+                mint.block_height.into(),
+                UserBalanceEntryType::Receive,
+            )
+            .await?;
+
         // get UserBalance from ticker hashmap and add mint
         if let Some(balance) = self.balances.get_mut(&owner) {
             balance.add_mint_tx(mint.clone());
 
             // TODO: Verify user balance exists in mongodb
-
             // Update user overall balance and available for the receiver in MongoDB
             mongo_client
                 .update_receiver_balance_document(

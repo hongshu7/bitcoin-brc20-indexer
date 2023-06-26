@@ -9,7 +9,7 @@ use super::{
 use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use log::{error, info};
-use mongodb::bson::{doc, Bson, Document};
+use mongodb::bson::{doc, Bson, DateTime, Document};
 use serde::Serialize;
 use std::{collections::HashMap, fmt};
 
@@ -35,6 +35,7 @@ impl ToDocument for Brc20Mint {
             "tx": self.tx.to_document(),
             "inscription": self.inscription.to_document(),
             "is_valid": self.is_valid,
+            "created_at": Bson::DateTime(DateTime::now())
         }
     }
 }
@@ -121,7 +122,12 @@ impl Brc20Mint {
             error!("INVALID: {}", reason);
 
             // Add the invalid mint transaction to the invalid transaction map
-            let invalid_tx = InvalidBrc20Tx::new(self.tx.txid, self.inscription.clone(), reason);
+            let invalid_tx = InvalidBrc20Tx::new(
+                self.tx.txid,
+                self.inscription.clone(),
+                reason,
+                self.block_height,
+            );
             invalid_tx_map.add_invalid_tx(invalid_tx.clone());
 
             // Insert the invalid mint inscription into MongoDB

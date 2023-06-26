@@ -6,7 +6,7 @@ use crate::brc20_index::consts;
 use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use log::{error, info};
-use mongodb::bson::{doc, Document};
+use mongodb::bson::{doc, Bson, DateTime, Document};
 use serde::Serialize;
 use std::{collections::HashMap, fmt};
 
@@ -128,6 +128,7 @@ impl Brc20Deploy {
                 valid_deploy_tx.tx.txid,
                 valid_deploy_tx.inscription.clone(),
                 reason,
+                valid_deploy_tx.block_height,
             );
             invalid_tx_map.add_invalid_tx(invalid_tx.clone());
 
@@ -218,6 +219,7 @@ impl ToDocument for Brc20Deploy {
             "tx": &self.tx.to_document(),
             "inscription": &self.inscription.to_document(),
             "is_valid": &self.is_valid,
+            "created_at": Bson::DateTime(DateTime::now())
         }
     }
 }

@@ -1,7 +1,10 @@
+use std::env;
+
+use super::user_balance::{UserBalanceEntry, UserBalanceEntryType};
 use super::ToDocument;
 use crate::brc20_index::consts;
 use crate::brc20_index::user_balance::UserBalance;
-use mongodb::bson::{doc, Bson, Document};
+use mongodb::bson::{doc, Bson, DateTime, Document};
 use mongodb::options::UpdateOptions;
 use mongodb::{bson, options::ClientOptions, Client};
 
@@ -15,9 +18,15 @@ impl MongoClient {
         connection_string: &str,
         db_name: &str,
     ) -> Result<Self, mongodb::error::Error> {
-        let client_options = ClientOptions::parse(connection_string).await?;
+        let mut client_options = ClientOptions::parse(connection_string).await?;
         // Uncomment when using locally
-        // client_options.direct_connection = Some(true);
+        // Get the mongo host from environment variable if on local workstation
+        let mongo_db_host = env::var("MONGO_DB_HOST");
+        match mongo_db_host {
+            Ok(_host) => client_options.direct_connection = Some(true),
+            Err(_) => (),
+        };
+
         let client = Client::with_options(client_options)?;
 
         Ok(Self {
@@ -273,6 +282,33 @@ impl MongoClient {
         Ok(())
     }
 
+    pub async fn insert_user_balance_entry(
+        &self,
+        address: &String,
+        amount: f64,
+        tick: &str,
+        block_height: u64,
+        entry_type: UserBalanceEntryType,
+    ) -> Result<(), anyhow::Error> {
+        // instantiate a new user balance entry
+        let user_balance_entry = UserBalanceEntry::new(
+            address.to_string(),
+            tick.to_string(),
+            block_height,
+            amount,
+            entry_type,
+        );
+
+        // Insert the new document into the MongoDB collection
+        self.insert_new_document(
+            consts::COLLECTION_USER_BALANCE_ENTRY,
+            user_balance_entry.to_document(),
+        )
+        .await?;
+
+        Ok(())
+    }
+
     pub async fn update_receiver_balance_document(
         &self,
         receiver_address: &String,
@@ -339,5 +375,50 @@ impl MongoClient {
         }
 
         Ok(())
+    }
+
+    pub async fn store_completed_block(
+        &self,
+        block_height: i64,
+    ) -> Result<(), mongodb::error::Error> {
+        let db = self.client.database(&self.db_name);
+        let collection = db.collection::<bson::Document>(consts::COLLECTION_BLOCKS_COMPLETED);
+
+        let document = doc! {
+            consts::KEY_BLOCK_HEIGHT: block_height,
+            "created_at": Bson::DateTime(DateTime::now())
+        };
+
+        collection.insert_one(document, None).await?;
+
+        Ok(())
+    }
+
+    pub async fn get_last_completed_block_height(
+        &self,
+    ) -> Result<Option<i64>, mongodb::error::Error> {
+        let db = self.client.database(&self.db_name);
+        let collection = db.collection::<bson::Document>(consts::COLLECTION_BLOCKS_COMPLETED);
+
+        // Sort in descending order to get the latest block height
+        let sort_doc = doc! { consts::KEY_BLOCK_HEIGHT: -1 };
+
+        // Find one document (the latest) with the sorted criteria
+        if let Some(result) = collection
+            .find_one(
+                None,
+                mongodb::options::FindOneOptions::builder()
+                    .sort(sort_doc)
+                    .build(),
+            )
+            .await?
+        {
+            if let Ok(block_height) = result.get_i64(consts::KEY_BLOCK_HEIGHT) {
+                return Ok(Some(block_height));
+            }
+        }
+
+        // No processed blocks found or unable to get the block_height field
+        Ok(None)
     }
 }

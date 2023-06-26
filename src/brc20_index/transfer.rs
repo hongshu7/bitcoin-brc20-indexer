@@ -1,11 +1,11 @@
 use super::{
     consts, invalid_brc20::InvalidBrc20Tx, mongo::MongoClient, Brc20Index, Brc20Inscription,
 };
-use crate::brc20_index::ToDocument;
+use crate::brc20_index::{user_balance::UserBalanceEntryType, ToDocument};
 use bitcoin::{Address, OutPoint};
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use log::{error, info};
-use mongodb::bson::{doc, Document};
+use mongodb::bson::{doc, Bson, DateTime, Document};
 use serde::Serialize;
 use std::fmt;
 
@@ -92,8 +92,12 @@ impl Brc20Transfer {
                 error!("INVALID: {}", reason);
 
                 // Create invalid deploy transaction
-                let invalid_tx =
-                    InvalidBrc20Tx::new(self.tx.txid, self.inscription.clone(), reason.clone());
+                let invalid_tx = InvalidBrc20Tx::new(
+                    self.tx.txid,
+                    self.inscription.clone(),
+                    reason.clone(),
+                    self.block_height,
+                );
 
                 // Add invalid deploy transaction to invalid tx map
                 index.invalid_tx_map.add_invalid_tx(invalid_tx.clone());
@@ -118,8 +122,12 @@ impl Brc20Transfer {
                 error!("INVALID: {}", reason);
 
                 // Create invalid deploy transaction
-                let invalid_tx =
-                    InvalidBrc20Tx::new(self.tx.txid, self.inscription.clone(), reason.clone());
+                let invalid_tx = InvalidBrc20Tx::new(
+                    self.tx.txid,
+                    self.inscription.clone(),
+                    reason.clone(),
+                    self.block_height,
+                );
 
                 // Add invalid deploy transaction to invalid tx map
                 index.invalid_tx_map.add_invalid_tx(invalid_tx.clone());
@@ -151,6 +159,17 @@ impl Brc20Transfer {
             // Increase the transferable balance of the sender
             user_balance.add_transfer_inscription(self.clone());
 
+            // Update user overall balance and available for the from address(inscriber) in MongoDB
+            mongo_client
+                .insert_user_balance_entry(
+                    &self.from.to_string(),
+                    transfer_amount,
+                    &self.inscription.tick.to_lowercase(),
+                    self.block_height.into(),
+                    UserBalanceEntryType::Inscription,
+                )
+                .await?;
+
             // Update the user balance document in MongoDB
             mongo_client
                 .update_transfer_inscriber_user_balance_document(
@@ -165,7 +184,12 @@ impl Brc20Transfer {
             error!("INVALID: {}", reason);
 
             // Create invalid deploy transaction
-            let invalid_tx = InvalidBrc20Tx::new(self.tx.txid, self.inscription.clone(), reason);
+            let invalid_tx = InvalidBrc20Tx::new(
+                self.tx.txid,
+                self.inscription.clone(),
+                reason,
+                self.block_height.into(),
+            );
 
             // Add invalid deploy transaction to invalid tx map
             index.invalid_tx_map.add_invalid_tx(invalid_tx.clone());
@@ -260,6 +284,7 @@ impl ToDocument for Brc20Transfer {
             "from": self.from.to_string(),
             "to": self.to.clone().map(|addr| addr.to_string()), // Convert Option<Address> to string
             "is_valid": self.is_valid,
+            "created_at": Bson::DateTime(DateTime::now())
         }
     }
 }
