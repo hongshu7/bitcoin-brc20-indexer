@@ -15,7 +15,7 @@ impl MongoClient {
         connection_string: &str,
         db_name: &str,
     ) -> Result<Self, mongodb::error::Error> {
-        let mut client_options = ClientOptions::parse(connection_string).await?;
+        let client_options = ClientOptions::parse(connection_string).await?;
         // Uncomment when using locally
         // client_options.direct_connection = Some(true);
         let client = Client::with_options(client_options)?;

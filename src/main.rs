@@ -73,7 +73,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let start_block_height = 779832; // 779832 is starting block height for BRC20
 
     // LFG!
-    index_brc20(&rpc, start_block_height).await?;
+    match index_brc20(&rpc, start_block_height).await {
+        Ok(_) => info!("Finished indexing BRC20 tokens"),
+        Err(e) => info!("Error indexing BRC20 tokens: {:?}", e),
+    };
 
     Ok(())
 }
