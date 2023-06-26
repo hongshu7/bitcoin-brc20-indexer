@@ -103,10 +103,7 @@ impl Brc20Transfer {
                     .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
                     .await?;
 
-                return Err(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    reason,
-                )));
+                return Ok(());
             }
         };
 
