@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::env;
 
 use super::user_balance::{UserBalanceEntry, UserBalanceEntryType};
 use super::ToDocument;
 use crate::brc20_index::consts;
 use crate::brc20_index::user_balance::UserBalance;
+use futures_util::stream::TryStreamExt;
 use mongodb::bson::{doc, Bson, DateTime, Document};
 use mongodb::options::UpdateOptions;
 use mongodb::{bson, options::ClientOptions, Client};
@@ -420,5 +422,160 @@ impl MongoClient {
 
         // No processed blocks found or unable to get the block_height field
         Ok(None)
+    }
+
+    pub async fn delete_from_collection(
+        &self,
+        collection_name: &str,
+        start_block_height: i64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let db = self.client.database(&self.db_name);
+        let collection = db.collection::<bson::Document>(collection_name);
+
+        collection
+            .delete_many(
+                doc! { "block_height": { "$gte": start_block_height } },
+                None,
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn drop_collection(
+        &self,
+        collection_name: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let db = self.client.database(&self.db_name);
+        let collection = db.collection::<bson::Document>(collection_name);
+
+        collection.delete_many(doc! {}, None).await?;
+
+        Ok(())
+    }
+
+    pub async fn reset_tickers_total_minted(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let db = self.client.database(&self.db_name);
+        let collection = db.collection::<bson::Document>(consts::COLLECTION_TICKERS);
+
+        let filter = doc! {}; // matches all documents
+        let update = doc! { "$set": { "total_minted": 0.0 } };
+
+        // Apply the update to all documents
+        let update_options = UpdateOptions::builder().upsert(false).build();
+        collection
+            .update_many(filter, update, update_options)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn calculate_and_update_total_minted(
+        &self,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let db = self.client.database(&self.db_name);
+        // Get a handle to the brc20_tickers collection
+        let tickers_coll = db.collection::<bson::Document>(consts::COLLECTION_TICKERS);
+
+        // Get a handle to the brc20_mints collection
+        let mints_coll = db.collection::<bson::Document>(consts::COLLECTION_MINTS);
+
+        // Get all tickers
+        let cursor = tickers_coll.find(None, None).await?;
+        let tickers: Vec<Document> = cursor.try_collect().await?;
+
+        for ticker in tickers {
+            // Extract ticker from the document
+            let tick = ticker.get_str("tick")?;
+
+            // Query all mints associated with this ticker
+            let filter = doc! { "inscription.tick": ticker.get_str("tick")? };
+            let cursor = mints_coll.find(filter, None).await?;
+            let mints: Vec<Document> = cursor.try_collect().await?;
+
+            // Sum the amounts
+            let total_minted: f64 = mints
+                .iter()
+                .filter_map(|mint| mint.get_f64("amt").ok())
+                .sum();
+
+            // Update "total_minted" for this ticker in the database
+            let filter = doc! { "tick": tick };
+            let update = doc! { "$set": { "total_minted": total_minted } };
+            tickers_coll.update_one(filter, update, None).await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn rebuild_user_balances(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let db = self.client.database(&self.db_name);
+
+        // Fetch all user balance entries
+        let user_balance_entries_coll =
+            db.collection::<bson::Document>(consts::COLLECTION_USER_BALANCE_ENTRY);
+        let cursor = user_balance_entries_coll.find(None, None).await?;
+        let user_balance_entries: Vec<Document> = cursor.try_collect().await?;
+
+        // Prepare a HashMap to hold user balances
+        let mut user_balances: HashMap<String, HashMap<String, (f64, f64, f64)>> = HashMap::new();
+
+        // Iterate over user balance entries
+        for user_balance_entry in user_balance_entries {
+            let address = user_balance_entry.get_str("address")?;
+            let ticker = user_balance_entry.get_str("tick")?;
+            let amount = user_balance_entry.get_f64("amt")?;
+            let entry_type: UserBalanceEntryType =
+                UserBalanceEntryType::from(user_balance_entry.get_str("entry_type")?);
+
+            let user_balance = user_balances
+                .entry(address.to_string())
+                .or_insert_with(HashMap::new);
+            let balance = user_balance
+                .entry(ticker.to_string())
+                .or_insert((0.0, 0.0, 0.0)); // (available_balance, transferable_balance, overall balance)
+
+            // Adjust balances based on entry type
+            match entry_type {
+                UserBalanceEntryType::Receive => {
+                    balance.0 += amount; // Increase the available balance
+                    balance.2 += amount; // Increase the overall balance
+                }
+                UserBalanceEntryType::Send => {
+                    balance.1 -= amount; // Decrease the transferable balance
+                    balance.2 -= amount; // Decrease the overall balance
+                }
+                UserBalanceEntryType::Inscription => {
+                    balance.0 -= amount; // Decrease the available balance
+                    balance.1 += amount; // Increase the transferable balance
+                }
+            }
+        }
+
+        // Get a handle to the "brc20_user_balances" collection
+        let user_balances_coll = db.collection::<bson::Document>("brc20_user_balances");
+
+        // Iterate over the constructed user balances
+        for (address, ticker_balances) in user_balances {
+            for (ticker, (available_balance, transferable_balance, overall_balance)) in
+                ticker_balances
+            {
+                // Construct a new user balance document
+                let new_user_balance = doc! {
+                    "address": &address,
+                    "tick": &ticker,
+                    "available_balance": available_balance,
+                    "transferable_balance": transferable_balance,
+                    "overall_balance": overall_balance,
+                };
+
+                // Insert the new user balance document into the "brc20_user_balances" collection
+                user_balances_coll
+                    .insert_one(new_user_balance, None)
+                    .await?;
+            }
+        }
+
+        Ok(())
     }
 }

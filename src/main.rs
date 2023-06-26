@@ -118,11 +118,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Starting indexing from block height: {}",
         start_block_height
     );
-    // if BRC20_STARTING_BLOCK_HEIGHT is < start_block_height, then we need to delete everything in db that is => start_block_height
-    // delete deploys, mints, transfers, inscriptions, tickers, invalids
-    // delete entire userbalance collection
-    // run function that recreate the userbalances based on userbalance entries in the db
-    // RUN FUNCTION TO RECALCULATE TOTAL_MINTED for each ticker
+    // if BRC20_STARTING_BLOCK_HEIGHT is < start_block_height, then we need to delete everything in db that is >= start_block_height
+    // delete deploys, mints, transfers, inscriptions, tickers, invalids, entries
+    if consts::BRC20_STARTING_BLOCK_HEIGHT < start_block_height {
+        let collections = vec![
+            consts::COLLECTION_DEPLOYS,
+            consts::COLLECTION_MINTS,
+            consts::COLLECTION_TRANSFERS,
+            consts::COLLECTION_INVALIDS,
+            consts::COLLECTION_TICKERS,
+            consts::COLLECTION_USER_BALANCE_ENTRY,
+        ];
+
+        for collection in collections {
+            mongo_client
+                .delete_from_collection(collection, start_block_height)
+                .await?;
+        }
+
+        //delete user balance collection
+        mongo_client
+            .drop_collection(consts::COLLECTION_USER_BALANCES)
+            .await?;
+
+        // reset total_minted for each ticker
+        // Reset all tickers total_minted to 0.0
+        match mongo_client.reset_tickers_total_minted().await {
+            Ok(_) => info!("Reset total_minted for all tickers"),
+            Err(e) => info!("Error resetting total_minted for all tickers: {:?}", e),
+        };
+
+        //recalculate total_minted for each ticker
+        match mongo_client.calculate_and_update_total_minted().await {
+            Ok(_) => info!("Recalculated total_minted for all tickers"),
+            Err(e) => info!("Error recalculating total_minted for all tickers: {:?}", e),
+        };
+
+        // rebuild userbalances
+        match mongo_client.rebuild_user_balances().await {
+            Ok(_) => info!("Recreated userbalances"),
+            Err(e) => info!("Error recreating userbalances: {:?}", e),
+        };
+    }
+
+    //TODO: Rebuild rust memory from db only
 
     // LFG!
     match index_brc20(&rpc, &mongo_client, start_block_height.try_into().unwrap()).await {
