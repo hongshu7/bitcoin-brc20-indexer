@@ -1,5 +1,3 @@
-use crate::brc20_index::consts;
-
 use super::{Brc20Inscription, ToDocument};
 use bitcoin::Txid;
 use mongodb::bson::{doc, Bson, DateTime, Document};

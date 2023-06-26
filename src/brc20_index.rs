@@ -8,21 +8,16 @@ use self::{
     user_balance::UserBalanceEntryType,
     utils::{extract_and_process_witness_data, get_owner_of_vout, get_witness_data_from_raw_tx},
 };
-use bitcoin::{block, Address, OutPoint};
+use bitcoin::{Address, OutPoint};
 use bitcoincore_rpc::bitcoincore_rpc_json::{
     GetRawTransactionResult, GetRawTransactionResultVin, GetRawTransactionResultVout,
     GetRawTransactionResultVoutScriptPubKey,
 };
 use bitcoincore_rpc::{self, Client, RpcApi};
-use consulrs::{
-    client::{ConsulClient, ConsulClientSettingsBuilder},
-    kv,
-};
 use log::{error, info};
 use mongodb::bson::{doc, Document};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::{collections::HashMap, env, thread::sleep, time::Duration};
+use std::{collections::HashMap, thread::sleep, time::Duration};
 
 mod brc20_ticker;
 pub mod consts;
