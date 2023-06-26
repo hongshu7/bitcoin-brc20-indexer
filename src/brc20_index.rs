@@ -301,7 +301,7 @@ pub async fn index_brc20(
     let mongo_connection_str = format!(
         "mongodb://{}:27017,{}:27017,{}:27017/omnisat?replicaSet=rs0",
         mongo_host[0].as_str().unwrap(),
-        mongo_host[1].as_str().unwrap(), 
+        mongo_host[1].as_str().unwrap(),
         mongo_host[2].as_str().unwrap(),
     );
     // let mongo_connection_str = "mongodb://localhost:27017"; // This uses localhost as mongo host
@@ -330,11 +330,24 @@ pub async fn index_brc20(
                         let mut tx_height = 0u32;
                         for transaction in block.txdata {
                             let txid = transaction.txid();
-                            // Get Raw Transaction
-                            let raw_tx = rpc.get_raw_transaction_info(&txid, None)?;
+                            // Get Raw Transaction Info
+                            let raw_tx = match rpc.get_raw_transaction_info(&txid, None) {
+                                Ok(tx) => tx,
+                                Err(e) => {
+                                    error!("Failed to get raw transaction info: {:?}", e);
+                                    continue; // This will skip the current iteration of the loop
+                                }
+                            };
 
                             // Get witness data from raw transaction
-                            let witness_data = get_witness_data_from_raw_tx(&raw_tx)?;
+                            let witness_data = match get_witness_data_from_raw_tx(&raw_tx) {
+                                Ok(data) => data,
+                                Err(e) => {
+                                    error!("Failed to get witness data: {:?}", e);
+                                    continue;
+                                }
+                            };
+
                             for witness in witness_data {
                                 if let Some(inscription) = extract_and_process_witness_data(witness)
                                 {
@@ -344,11 +357,17 @@ pub async fn index_brc20(
                                     info!("Raw Brc-20 data: {}", pretty_json);
 
                                     // get owner address, inscription is first satoshi of first output
-                                    let owner = get_owner_of_vout(&raw_tx, 0)?;
+                                    let owner = match get_owner_of_vout(&raw_tx, 0) {
+                                        Ok(owner) => owner,
+                                        Err(e) => {
+                                            error!("Failed to get owner: {:?}", e);
+                                            continue;
+                                        }
+                                    };
 
                                     match &inscription.op[..] {
                                         "deploy" => {
-                                            handle_deploy_operation(
+                                            match handle_deploy_operation(
                                                 &client,
                                                 inscription,
                                                 raw_tx.clone(),
@@ -357,10 +376,19 @@ pub async fn index_brc20(
                                                 tx_height,
                                                 &mut brc20_index,
                                             )
-                                            .await?
+                                            .await
+                                            {
+                                                Ok(_) => (),
+                                                Err(e) => {
+                                                    error!(
+                                                        "Error handling deploy operation: {:?}",
+                                                        e
+                                                    );
+                                                }
+                                            };
                                         }
                                         "mint" => {
-                                            handle_mint_operation(
+                                            match handle_mint_operation(
                                                 &client,
                                                 current_block_height,
                                                 tx_height,
@@ -369,10 +397,19 @@ pub async fn index_brc20(
                                                 &raw_tx,
                                                 &mut brc20_index,
                                             )
-                                            .await?
+                                            .await
+                                            {
+                                                Ok(_) => (),
+                                                Err(e) => {
+                                                    error!(
+                                                        "Error handling mint operation: {:?}",
+                                                        e
+                                                    );
+                                                }
+                                            };
                                         }
                                         "transfer" => {
-                                            handle_transfer_operation(
+                                            match handle_transfer_operation(
                                                 &client,
                                                 current_block_height,
                                                 tx_height,
@@ -381,7 +418,16 @@ pub async fn index_brc20(
                                                 owner.clone(),
                                                 &mut brc20_index,
                                             )
-                                            .await?
+                                            .await
+                                            {
+                                                Ok(_) => (),
+                                                Err(e) => {
+                                                    error!(
+                                                        "Error handling transfer inscription: {:?}",
+                                                        e
+                                                    );
+                                                }
+                                            };
                                         }
                                         _ => {
                                             // Unexpected operation
@@ -391,9 +437,15 @@ pub async fn index_brc20(
                                 } else {
                                     // No inscription found
                                     // check if the tx is sending a transfer inscription
-                                    brc20_index
+                                    match brc20_index
                                         .check_for_transfer_send(&client, &rpc, &raw_tx)
-                                        .await?;
+                                        .await
+                                    {
+                                        Ok(_) => (),
+                                        Err(e) => {
+                                            error!("Error checking for transfer send: {:?}", e);
+                                        }
+                                    };
                                 }
                             }
                             // Increment the tx height

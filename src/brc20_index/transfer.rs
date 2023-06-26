@@ -128,6 +128,7 @@ impl Brc20Transfer {
                 mongo_client
                     .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
                     .await?;
+
                 return Ok(());
             }
         };
