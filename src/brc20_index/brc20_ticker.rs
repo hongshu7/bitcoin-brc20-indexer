@@ -1,10 +1,5 @@
 use super::{
-    consts,
-    deploy::Brc20Deploy,
-    mint::Brc20Mint,
-    mongo::MongoClient,
-    transfer::Brc20Transfer,
-    user_balance::{UserBalance, UserBalanceEntryType},
+    deploy::Brc20Deploy, mint::Brc20Mint, transfer::Brc20Transfer, user_balance::UserBalance,
     ToDocument,
 };
 use bitcoin::{Address, OutPoint};
@@ -126,84 +121,6 @@ impl Brc20Ticker {
               user_balance.get_transferable_balance()
           );
         }
-    }
-
-    // Adds a mint transaction to the owner's balance. If the owner's balance doesn't exist yet, it
-    // creates a new one. Also updates the total minted tokens for this Brc20Ticker.
-    pub async fn add_mint_to_ticker(
-        &mut self,
-        mint: Brc20Mint,
-        mongo_client: &MongoClient,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let owner = mint.to.clone();
-        let mint_amount = mint.get_amount();
-
-        // insert user balance entry into MongoDB
-        mongo_client
-            .insert_user_balance_entry(
-                &owner.to_string(),
-                mint_amount,
-                &self.get_ticker(),
-                mint.block_height.into(),
-                UserBalanceEntryType::Receive,
-            )
-            .await?;
-
-        // get UserBalance from ticker hashmap and add mint
-        if let Some(balance) = self.balances.get_mut(&owner) {
-            balance.add_mint_tx(mint.clone());
-
-            // TODO: Verify user balance exists in mongodb
-            // Update user overall balance and available for the receiver in MongoDB
-            mongo_client
-                .update_receiver_balance_document(
-                    &owner.to_string(),
-                    mint_amount,
-                    &self.get_ticker(),
-                )
-                .await?;
-        } else {
-            //if user balance doesn not exist, create a new one
-            let mut user_balance = UserBalance::new(mint.to.to_string(), self.get_ticker().clone());
-            user_balance.add_mint_tx(mint.clone());
-            self.balances.insert(owner.clone(), user_balance.clone());
-
-            // Insert the UserBalance into MongoDB
-            mongo_client
-                .insert_document(consts::COLLECTION_USER_BALANCES, user_balance.to_document())
-                .await?;
-        }
-        // update total minted tokens for ticker
-        self.total_minted += mint.amt;
-        self.mints.push(mint);
-
-        // Update total minted tokens for this ticker in MongoDB
-        mongo_client
-            .update_brc20_ticker_total_minted(&self.get_ticker(), mint_amount)
-            .await?;
-
-        //--------------//
-        // log to console
-        if let Some(user_balance) = self.get_user_balance(&owner) {
-            log::info!(
-              "Minted tokens for user {}: overall balance = {}, available balance = {}, transferable balance = {}",
-              owner,
-              user_balance.get_overall_balance(),
-              user_balance.get_available_balance(),
-              user_balance.get_transferable_balance()
-          );
-            log::info!(
-                "Total minted tokens for ticker {}:  {}",
-                self.get_ticker(),
-                self.get_total_supply()
-            );
-        }
-
-        Ok(())
-    }
-
-    pub fn get_user_balance(&self, address: &Address) -> Option<&UserBalance> {
-        self.balances.get(address)
     }
 
     // A method to get a mutable reference to a user's balance

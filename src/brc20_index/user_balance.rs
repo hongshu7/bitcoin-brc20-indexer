@@ -74,11 +74,6 @@ impl UserBalance {
         self.active_transfer_inscriptions.remove(&outpoint)
     }
 
-    pub fn add_mint_tx(&mut self, mint: Brc20Mint) {
-        self.mints.push(mint);
-        self.set_balances();
-    }
-
     // get active transfer inscriptions
     pub fn get_active_transfer_inscriptions(&self) -> &HashMap<OutPoint, Brc20Transfer> {
         &self.active_transfer_inscriptions
