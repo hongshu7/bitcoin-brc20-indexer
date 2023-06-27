@@ -75,13 +75,30 @@ impl Brc20Mint {
         let mut is_valid = false;
         let mut reason = String::new();
 
-        if let Some(ticker) = ticker_map.get(&self.inscription.tick.to_lowercase()) {
-            //TODO: get these values from db
-            let limit = ticker.get_limit();
-            let max_supply = ticker.get_max_supply();
-            let total_minted = ticker.get_total_supply();
+        let ticker_doc_from_mongo = mongo_client
+            .get_document_by_field(
+                consts::COLLECTION_TICKERS,
+                "tick",
+                &self.inscription.tick.to_lowercase(),
+            )
+            .await?;
+
+        if let Some(ticker_doc) = ticker_doc_from_mongo {
+            let limit = mongo_client
+                .get_double(&ticker_doc, "limit")
+                .unwrap_or_default();
+            let max_supply = mongo_client
+                .get_double(&ticker_doc, "max_supply")
+                .unwrap_or_default();
+            let total_minted = mongo_client
+                .get_double(&ticker_doc, "total_minted")
+                .unwrap_or_default();
+            let decimals = mongo_client
+                .get_i32(&ticker_doc, "decimals")
+                .unwrap_or_default();
+
             let amount = match self.inscription.amt.as_ref().map(String::as_str) {
-                Some(amt_str) => convert_to_float(amt_str, ticker.get_decimals()),
+                Some(amt_str) => convert_to_float(amt_str, decimals.try_into().unwrap()),
                 None => Ok(0.0),
             };
 
@@ -123,7 +140,6 @@ impl Brc20Mint {
                 reason,
                 self.block_height,
             );
-            // invalid_tx_map.add_invalid_tx(invalid_tx.clone());
 
             // Insert the invalid mint inscription into MongoDB
             mongo_client

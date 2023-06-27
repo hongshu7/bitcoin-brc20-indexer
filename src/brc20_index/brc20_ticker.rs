@@ -219,16 +219,4 @@ impl Brc20Ticker {
     pub fn get_ticker(&self) -> String {
         self.tick.to_lowercase()
     }
-
-    pub fn get_decimals(&self) -> u8 {
-        self.decimals
-    }
-
-    pub fn get_limit(&self) -> f64 {
-        self.limit
-    }
-
-    pub fn get_max_supply(&self) -> f64 {
-        self.max_supply
-    }
 }
