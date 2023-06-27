@@ -128,11 +128,6 @@ impl Brc20Ticker {
         self.balances.get_mut(address)
     }
 
-    // get total_minted from mints
-    pub fn get_total_supply(&self) -> f64 {
-        self.mints.iter().map(|mint| mint.get_amount()).sum()
-    }
-
     pub fn get_ticker(&self) -> String {
         self.tick.to_lowercase()
     }

@@ -375,7 +375,6 @@ pub async fn index_brc20(
                                                 owner,
                                                 inscription,
                                                 &raw_tx,
-                                                &mut brc20_index,
                                             )
                                             .await
                                             {
