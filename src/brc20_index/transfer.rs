@@ -1,46 +1,26 @@
-use super::{
-    consts, invalid_brc20::InvalidBrc20Tx, mongo::MongoClient, Brc20Index, Brc20Inscription,
-};
+use super::{consts, invalid_brc20::InvalidBrc20Tx, mongo::MongoClient, Brc20Inscription};
 use crate::brc20_index::{user_balance::UserBalanceEntryType, ToDocument};
-use bitcoin::{Address, OutPoint, Txid};
+use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use log::{error, info};
 use mongodb::bson::{doc, Bson, DateTime, Document};
 use serde::Serialize;
-use std::fmt;
+use std::{collections::HashMap, fmt};
 
 // create active transfer struct
+#[derive(Serialize)]
 pub struct Brc20ActiveTransfer {
-    pub tx_id: Txid,
-    pub vout: u32,
-    pub tick: String,
-    pub block_height: u32,
-    pub tx_height: u32,
-    pub from: Address,
-    pub amt: f64,
-    pub inscription: Brc20Inscription,
+    pub tx_id: String,
+    pub vout: i64,
+    pub block_height: i64,
 }
 
 impl Brc20ActiveTransfer {
-    pub fn new(
-        tx_id: Txid,
-        vout: u32,
-        tick: String,
-        block_height: u32,
-        tx_height: u32,
-        from: Address,
-        amt: f64,
-        inscription: Brc20Inscription,
-    ) -> Self {
+    pub fn new(tx_id: String, vout: i64, block_height: i64) -> Self {
         Brc20ActiveTransfer {
             tx_id,
             vout,
-            tick,
             block_height,
-            tx_height,
-            from,
-            amt,
-            inscription,
         }
     }
 }
@@ -90,14 +70,6 @@ impl Brc20Transfer {
         &self.inscription
     }
 
-    // get OutPoint
-    pub fn get_inscription_outpoint(&self) -> OutPoint {
-        OutPoint {
-            txid: self.tx.txid.clone(),
-            vout: 0,
-        }
-    }
-
     pub fn is_valid(&self) -> bool {
         self.is_valid
     }
@@ -105,6 +77,7 @@ impl Brc20Transfer {
     pub async fn validate_inscribe_transfer(
         &mut self,
         mongo_client: &MongoClient,
+        active_transfers: &mut Option<HashMap<(String, i64), Brc20ActiveTransfer>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let from = &self.from;
         let ticker_symbol = &self.inscription.tick.to_lowercase();
@@ -179,24 +152,19 @@ impl Brc20Transfer {
                     .await?;
 
                 // Create new active transfer when inscription is valid
-                let active_transfer = Brc20ActiveTransfer::new(
-                    self.tx.txid.clone(),
-                    0,
-                    self.inscription.tick.to_lowercase(),
-                    self.block_height,
-                    self.tx_height,
-                    self.from.clone(),
-                    transfer_amount,
-                    self.inscription.clone(),
-                );
+                let active_transfer =
+                    Brc20ActiveTransfer::new(self.tx.txid.to_string(), 0, self.block_height.into());
 
-                // Insert Active Transfer into MongoDB
-                mongo_client
-                    .insert_document(
-                        consts::COLLECTION_BRC20_ACTIVE_TRANSFERS,
-                        active_transfer.to_document(),
-                    )
-                    .await?;
+                // If active_transfers is None, create a new HashMap and assign it to active_transfers
+                if active_transfers.is_none() {
+                    *active_transfers = Some(HashMap::new());
+                }
+
+                // We know active_transfers is Some at this point, so we can unwrap it
+                active_transfers
+                    .as_mut()
+                    .unwrap()
+                    .insert((self.tx.txid.to_string(), 0), active_transfer);
             } else {
                 // if invalid, add invalid tx and return
                 let reason = "Transfer amount exceeds available balance";
@@ -258,7 +226,7 @@ pub async fn handle_transfer_operation(
     inscription: Brc20Inscription,
     raw_tx: GetRawTransactionResult,
     sender: Address,
-    brc20_index: &mut Brc20Index,
+    active_transfers: &mut Option<HashMap<(String, i64), Brc20ActiveTransfer>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Create a new transfer transaction
     let mut validated_transfer_tx =
@@ -266,19 +234,10 @@ pub async fn handle_transfer_operation(
 
     // Handle the transfer inscription
     let _ = validated_transfer_tx
-        .validate_inscribe_transfer(mongo_client)
+        .validate_inscribe_transfer(mongo_client, active_transfers)
         .await?;
 
     let from_address = validated_transfer_tx.from.clone();
-
-    brc20_index.update_active_transfer_inscription(
-        validated_transfer_tx.get_inscription_outpoint(),
-        validated_transfer_tx
-            .get_transfer_script()
-            .tick
-            .to_lowercase()
-            .clone(),
-    );
 
     if validated_transfer_tx.is_valid() {
         info!(
@@ -321,13 +280,31 @@ impl ToDocument for Brc20ActiveTransfer {
         doc! {
             "txid": self.tx_id.to_string(),
             "vout": self.vout,
-            "tick": &self.tick,
             "block_height": self.block_height,
-            "tx_height": self.tx_height,
-            "from": self.from.to_string(),
-            "amt": self.amt,
-            "inscription": self.inscription.to_document(), // Assuming Brc20Inscription implements ToDocument
             "created_at": Bson::DateTime(DateTime::now())
         }
+    }
+}
+
+impl Brc20ActiveTransfer {
+    pub fn from_document(document: Document) -> Result<Self, String> {
+        let tx_id = document
+            .get_str("tx_id")
+            .map_err(|_| "Invalid txid".to_string())?
+            .to_string();
+
+        let vout = document
+            .get_i64("vout")
+            .map_err(|_| "Invalid vout".to_string())?;
+
+        let block_height = document
+            .get_i64("block_height")
+            .map_err(|_| "Invalid block_height".to_string())?;
+
+        Ok(Self {
+            tx_id,
+            vout,
+            block_height,
+        })
     }
 }
