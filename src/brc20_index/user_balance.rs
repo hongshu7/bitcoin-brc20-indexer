@@ -52,24 +52,6 @@ impl UserBalance {
             .sum()
     }
 
-    pub fn add_transfer_inscription(&mut self, transfer_inscription: Brc20Transfer) {
-        self.active_transfer_inscriptions.insert(
-            transfer_inscription.get_inscription_outpoint(),
-            transfer_inscription.clone(),
-        );
-        self.set_balances();
-
-        // display user overall balance
-        println!("User overall balance: {}", self.get_overall_balance());
-        // display user available balance
-        println!("User available balance: {}", self.get_available_balance());
-        // display user transferable balance
-        println!(
-            "User transferable balance: {}",
-            self.get_transferable_balance()
-        );
-    }
-
     pub fn remove_inscription(&mut self, outpoint: &OutPoint) -> Option<Brc20Transfer> {
         self.active_transfer_inscriptions.remove(&outpoint)
     }

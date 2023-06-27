@@ -62,11 +62,4 @@ impl InvalidBrc20TxMap {
             map: HashMap::new(),
         }
     }
-
-    // adds an invalid transaction to the map.
-    // uses the transaction id as the key to store the invalid transaction.
-    pub fn add_invalid_tx(&mut self, invalid_tx: InvalidBrc20Tx) {
-        let tx_id = invalid_tx.tx_id;
-        self.map.insert(tx_id, invalid_tx);
-    }
 }

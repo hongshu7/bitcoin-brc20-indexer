@@ -123,11 +123,6 @@ impl Brc20Ticker {
         }
     }
 
-    // A method to get a mutable reference to a user's balance
-    pub fn get_user_balance_mut(&mut self, address: &Address) -> Option<&mut UserBalance> {
-        self.balances.get_mut(address)
-    }
-
     pub fn get_ticker(&self) -> String {
         self.tick.to_lowercase()
     }

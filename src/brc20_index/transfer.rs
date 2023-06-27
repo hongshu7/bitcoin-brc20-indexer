@@ -76,129 +76,210 @@ impl Brc20Transfer {
         self.is_valid
     }
 
-    pub async fn handle_inscribe_transfer(
+    pub async fn validate_inscribe_transfer(
         &mut self,
-        index: &mut Brc20Index,
         mongo_client: &MongoClient,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let from = &self.from;
         let ticker_symbol = &self.inscription.tick.to_lowercase();
 
-        let ticker = match index.get_ticker_mut(ticker_symbol) {
-            Some(ticker) => ticker,
-            // if ticker not found, add invalid tx and return
-            None => {
-                let reason = "Ticker not found".to_string();
-                error!("INVALID: {}", reason);
+        // get ticker doc from mongo
+        let ticker_doc_from_mongo = mongo_client
+            .get_document_by_field(consts::COLLECTION_TICKERS, "tick", ticker_symbol)
+            .await?;
 
-                // Create invalid deploy transaction
-                let invalid_tx = InvalidBrc20Tx::new(
-                    self.tx.txid,
-                    self.inscription.clone(),
-                    reason.clone(),
-                    self.block_height,
-                );
+        if ticker_doc_from_mongo.is_none() {
+            // Ticker not found, create invalid transaction
+            let reason = "Ticker not found";
+            error!("INVALID Transfer Inscribe: {}", reason);
 
-                // Add invalid deploy transaction to invalid tx map
-                index.invalid_tx_map.add_invalid_tx(invalid_tx.clone());
+            self.insert_invalid_tx(reason, mongo_client).await?;
 
-                // Insert the invalid deploy transaction into MongoDB
-                mongo_client
-                    .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
-                    .await?;
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                reason,
+            )));
+        }
 
-                return Err(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    reason,
-                )));
-            }
+        // get the user balance from mongo
+        let filter = doc! {
+          "address": from.to_string(),
+          "tick": self.inscription.tick.to_lowercase(),
         };
 
-        let user_balance = match ticker.get_user_balance_mut(&from) {
-            Some(balance) => balance,
-            // if user balance not found, add invalid tx and return
-            None => {
-                let reason = "User balance not found".to_string();
-                error!("INVALID: {}", reason);
+        let user_balance_from = mongo_client
+            .get_user_balance_document(consts::COLLECTION_USER_BALANCES, filter.clone())
+            .await?;
 
-                // Create invalid deploy transaction
-                let invalid_tx = InvalidBrc20Tx::new(
-                    self.tx.txid,
-                    self.inscription.clone(),
-                    reason.clone(),
-                    self.block_height,
-                );
+        if let Some(user_balance) = user_balance_from {
+            let available_balance = mongo_client
+                .get_double(&user_balance, "available_balance")
+                .unwrap_or_default();
 
-                // Add invalid deploy transaction to invalid tx map
-                index.invalid_tx_map.add_invalid_tx(invalid_tx.clone());
+            // get transfer amount
+            let transfer_amount = self
+                .inscription
+                .amt
+                .as_ref()
+                .and_then(|amt_str| amt_str.parse::<f64>().ok())
+                .unwrap_or(0.0);
 
-                // Insert the invalid deploy transaction into MongoDB
+            // check if user has enough balance to transfer
+            if available_balance >= transfer_amount {
+                println!("VALID: Transfer inscription added. From: {:#?}", from);
+
+                // if valid, add transfer inscription to user balance
+                self.is_valid = true;
+
+                // insert user balance entry
                 mongo_client
-                    .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
+                    .insert_user_balance_entry(
+                        &self.from.to_string(),
+                        transfer_amount,
+                        &self.inscription.tick.to_lowercase(),
+                        self.block_height.into(),
+                        UserBalanceEntryType::Inscription,
+                    )
                     .await?;
 
-                return Ok(());
+                // Update the user balance document in MongoDB
+                mongo_client
+                    .update_transfer_inscriber_user_balance_document(
+                        &from.to_string(),
+                        transfer_amount,
+                        ticker_symbol,
+                        user_balance,
+                    )
+                    .await?;
+            } else {
+                // if invalid, add invalid tx and return
+                let reason = "Transfer amount exceeds available balance";
+                error!("INVALID: {}", reason);
+
+                self.insert_invalid_tx(reason, mongo_client).await?;
             }
-        };
-
-        // get transfer amount
-        let transfer_amount = self
-            .inscription
-            .amt
-            .as_ref()
-            .and_then(|amt_str| amt_str.parse::<f64>().ok())
-            .unwrap_or(0.0);
-
-        // TODO: get avail bal from db
-        // check if user has enough balance to transfer
-        if user_balance.get_available_balance() >= transfer_amount {
-            // if valid, add transfer inscription to user balance
-            self.is_valid = true;
-            println!("VALID: Transfer inscription added. From: {:#?}", from);
-
-            // Increase the transferable balance of the sender
-            user_balance.add_transfer_inscription(self.clone());
-
-            // Update user overall balance and available for the from address(inscriber) in MongoDB
-            mongo_client
-                .insert_user_balance_entry(
-                    &self.from.to_string(),
-                    transfer_amount,
-                    &self.inscription.tick.to_lowercase(),
-                    self.block_height.into(),
-                    UserBalanceEntryType::Inscription,
-                )
-                .await?;
-
-            // Update the user balance document in MongoDB
-            mongo_client
-                .update_transfer_inscriber_user_balance_document(
-                    &from.to_string(),
-                    transfer_amount,
-                    ticker_symbol,
-                )
-                .await?;
         } else {
-            // if invalid, add invalid tx and return
-            let reason = "Transfer amount exceeds available balance".to_string();
+            // User balance not found, create invalid transaction
+            let reason = "User balance not found";
             error!("INVALID: {}", reason);
 
-            // Create invalid deploy transaction
-            let invalid_tx = InvalidBrc20Tx::new(
-                self.tx.txid,
-                self.inscription.clone(),
-                reason,
-                self.block_height.into(),
-            );
-
-            // Add invalid deploy transaction to invalid tx map
-            index.invalid_tx_map.add_invalid_tx(invalid_tx.clone());
-
-            // Insert the invalid deploy transaction into MongoDB
-            mongo_client
-                .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
-                .await?;
+            self.insert_invalid_tx(reason, mongo_client).await?;
         }
+
+        Ok(())
+    }
+
+    // pub async fn validate_inscribe_transfer(
+    //     &mut self,
+    //     mongo_client: &MongoClient,
+    // ) -> Result<(), Box<dyn std::error::Error>> {
+    //     let from = &self.from;
+    //     let ticker_symbol = &self.inscription.tick.to_lowercase();
+
+    //     // get ticker doc from mongo
+    //     let ticker_doc_from_mongo = mongo_client
+    //         .get_document_by_field(consts::COLLECTION_TICKERS, "tick", ticker_symbol)
+    //         .await?;
+
+    //     if ticker_doc_from_mongo.is_none() {
+    //         // Ticker not found, create invalid transaction
+    //         let reason = "Ticker not found";
+    //         error!("INVALID Transfer Inscribe: {}", reason);
+
+    //         self.insert_invalid_tx(reason, mongo_client).await?;
+
+    //         return Err(Box::new(std::io::Error::new(
+    //             std::io::ErrorKind::Other,
+    //             reason,
+    //         )));
+    //     }
+
+    //     // get the user balance from mongo
+    //     let filter = doc! {
+    //       "address": from.to_string(),
+    //       "tick": self.inscription.tick.to_lowercase(),
+    //     };
+
+    //     let user_balance_doc = mongo_client
+    //         .get_user_balance_document(consts::COLLECTION_USER_BALANCES, filter)
+    //         .await?;
+
+    //     if user_balance_doc.is_none() {
+    //         // User balance not found, create invalid transaction
+    //         let reason = "User balance not found";
+    //         error!("INVALID: {}", reason);
+
+    //         self.insert_invalid_tx(reason, mongo_client).await?;
+
+    //         return Ok(());
+    //     }
+
+    //     let user_balance = user_balance_doc.unwrap();
+    //     let available_balance = mongo_client
+    //         .get_double(&user_balance, "available_balance")
+    //         .unwrap_or_default();
+
+    //     // get transfer amount
+    //     let transfer_amount = self
+    //         .inscription
+    //         .amt
+    //         .as_ref()
+    //         .and_then(|amt_str| amt_str.parse::<f64>().ok())
+    //         .unwrap_or(0.0);
+
+    //     // check if user has enough balance to transfer
+    //     if available_balance >= transfer_amount {
+    //         println!("VALID: Transfer inscription added. From: {:#?}", from);
+
+    //         // if valid, add transfer inscription to user balance
+    //         self.is_valid = true;
+
+    //         // insert user balance entry
+    //         mongo_client
+    //             .insert_user_balance_entry(
+    //                 &self.from.to_string(),
+    //                 transfer_amount,
+    //                 &self.inscription.tick.to_lowercase(),
+    //                 self.block_height.into(),
+    //                 UserBalanceEntryType::Inscription,
+    //             )
+    //             .await?;
+
+    //         // Update the user balance document in MongoDB
+    //         mongo_client
+    //             .update_transfer_inscriber_user_balance_document(
+    //                 &from.to_string(),
+    //                 transfer_amount,
+    //                 ticker_symbol,
+    //             )
+    //             .await?;
+    //     } else {
+    //         // if invalid, add invalid tx and return
+    //         let reason = "Transfer amount exceeds available balance";
+    //         error!("INVALID: {}", reason);
+
+    //         self.insert_invalid_tx(reason, mongo_client).await?;
+    //     }
+
+    //     Ok(())
+    // }
+
+    pub async fn insert_invalid_tx(
+        &self,
+        reason: &str,
+        mongo_client: &MongoClient,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let invalid_tx = InvalidBrc20Tx::new(
+            self.tx.txid,
+            self.inscription.clone(),
+            reason.to_string(),
+            self.block_height,
+        );
+
+        // Insert the invalid transaction into MongoDB
+        mongo_client
+            .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
+            .await?;
 
         Ok(())
     }
@@ -237,9 +318,9 @@ pub async fn handle_transfer_operation(
     let mut validated_transfer_tx =
         Brc20Transfer::new(raw_tx, inscription, block_height, tx_height, sender);
 
-    // Handle the transfer transaction
+    // Handle the transfer inscription
     let _ = validated_transfer_tx
-        .handle_inscribe_transfer(brc20_index, mongo_client)
+        .validate_inscribe_transfer(mongo_client)
         .await?;
 
     let from_address = validated_transfer_tx.from.clone();
@@ -259,15 +340,15 @@ pub async fn handle_transfer_operation(
             validated_transfer_tx.get_transfer_script()
         );
         info!("From Address: {:?}", &from_address);
-    }
 
-    // Add the transfer transaction to the mongo database
-    mongo_client
-        .insert_document(
-            consts::COLLECTION_TRANSFERS,
-            validated_transfer_tx.to_document(),
-        )
-        .await?;
+        // Add the valid transfer to the mongo database
+        mongo_client
+            .insert_document(
+                consts::COLLECTION_TRANSFERS,
+                validated_transfer_tx.to_document(),
+            )
+            .await?;
+    }
 
     Ok(())
 }
