@@ -1,10 +1,6 @@
 use super::{
-    brc20_ticker::Brc20Ticker,
-    consts,
-    invalid_brc20::{InvalidBrc20Tx, InvalidBrc20TxMap},
-    mongo::MongoClient,
-    utils::convert_to_float,
-    Brc20Index, Brc20Inscription, ToDocument,
+    brc20_ticker::Brc20Ticker, consts, invalid_brc20::InvalidBrc20Tx, mongo::MongoClient,
+    utils::convert_to_float, Brc20Index, Brc20Inscription, ToDocument,
 };
 use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
@@ -74,7 +70,6 @@ impl Brc20Mint {
     pub async fn validate_mint<'a>(
         mut self,
         ticker_map: &'a mut HashMap<String, Brc20Ticker>,
-        invalid_tx_map: &'a mut InvalidBrc20TxMap,
         mongo_client: &MongoClient,
     ) -> Result<Brc20Mint, Box<dyn std::error::Error>> {
         let mut is_valid = false;
@@ -128,7 +123,7 @@ impl Brc20Mint {
                 reason,
                 self.block_height,
             );
-            invalid_tx_map.add_invalid_tx(invalid_tx.clone());
+            // invalid_tx_map.add_invalid_tx(invalid_tx.clone());
 
             // Insert the invalid mint inscription into MongoDB
             mongo_client
@@ -173,11 +168,7 @@ pub async fn handle_mint_operation(
     brc20_index: &mut Brc20Index,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let validated_mint_tx = Brc20Mint::new(&raw_tx, inscription, block_height, tx_height, owner)
-        .validate_mint(
-            &mut brc20_index.tickers,
-            &mut brc20_index.invalid_tx_map,
-            mongo_client,
-        )
+        .validate_mint(&mut brc20_index.tickers, mongo_client)
         .await?;
 
     // Check if the mint operation is valid.
