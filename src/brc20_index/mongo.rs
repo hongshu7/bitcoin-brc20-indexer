@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::env;
 
+use super::transfer::Brc20ActiveTransfer;
 use super::user_balance::{UserBalanceEntry, UserBalanceEntryType};
 use super::ToDocument;
 use crate::brc20_index::consts;
 use crate::brc20_index::user_balance::UserBalance;
 use futures_util::stream::TryStreamExt;
+use futures_util::StreamExt;
 use mongodb::bson::{doc, Bson, DateTime, Document};
 use mongodb::options::UpdateOptions;
 use mongodb::{bson, options::ClientOptions, Client};
@@ -35,19 +37,6 @@ impl MongoClient {
             client,
             db_name: db_name.to_string(),
         })
-    }
-
-    pub async fn delete_document(
-        &self,
-        collection_name: &str,
-        filter: Document,
-    ) -> Result<(), mongodb::error::Error> {
-        let db = self.client.database(&self.db_name);
-        let collection = db.collection::<bson::Document>(collection_name);
-
-        collection.delete_one(filter, None).await?;
-
-        Ok(())
     }
 
     pub async fn insert_document(
@@ -633,5 +622,63 @@ impl MongoClient {
             Ok(value) => Ok(value.to_string()),
             Err(e) => Err(e),
         }
+    }
+
+    pub async fn load_active_transfers(
+        &self,
+    ) -> Result<Option<HashMap<(String, i64), Brc20ActiveTransfer>>, String> {
+        let mut active_transfers = HashMap::new();
+
+        let db = self.client.database(&self.db_name);
+        let collection = db.collection::<bson::Document>(consts::COLLECTION_BRC20_ACTIVE_TRANSFERS);
+
+        // Check if the collection has any documents
+        let doc_count = collection
+            .estimated_document_count(None)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // If no documents, return None
+        if doc_count == 0 {
+            return Ok(None);
+        }
+
+        let mut cursor = collection
+            .find(None, None)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        while let Some(result) = cursor.next().await {
+            match result {
+                Ok(document) => {
+                    let active_transfer = Brc20ActiveTransfer::from_document(document)?;
+                    let key = (active_transfer.tx_id.clone(), active_transfer.vout);
+                    active_transfers.insert(key, active_transfer);
+                }
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+
+        Ok(Some(active_transfers))
+    }
+
+    pub async fn insert_active_transfers_to_mongodb(
+        &self,
+        active_transfers: HashMap<(String, i64), Brc20ActiveTransfer>,
+    ) -> Result<(), mongodb::error::Error> {
+        // Get a handle to the collection where you want to insert the documents.
+        let db = self.client.database(&self.db_name);
+        let collection = db.collection(consts::COLLECTION_BRC20_ACTIVE_TRANSFERS);
+
+        // Convert the HashMap to a Vec<bson::Document>.
+        let documents: Result<Vec<bson::Document>, _> = active_transfers
+            .values()
+            .map(|value| bson::to_document(value))
+            .collect::<Result<Vec<_>, _>>();
+
+        // Insert the documents into the collection.
+        collection.insert_many(documents?, None).await?;
+
+        Ok(())
     }
 }
