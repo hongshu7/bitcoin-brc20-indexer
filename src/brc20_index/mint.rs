@@ -57,10 +57,6 @@ impl Brc20Mint {
         }
     }
 
-    pub fn get_amount(&self) -> f64 {
-        self.amt
-    }
-
     pub fn is_valid(&self) -> bool {
         self.is_valid
     }

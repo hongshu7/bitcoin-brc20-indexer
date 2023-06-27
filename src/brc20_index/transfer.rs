@@ -2,12 +2,48 @@ use super::{
     consts, invalid_brc20::InvalidBrc20Tx, mongo::MongoClient, Brc20Index, Brc20Inscription,
 };
 use crate::brc20_index::{user_balance::UserBalanceEntryType, ToDocument};
-use bitcoin::{Address, OutPoint};
+use bitcoin::{Address, OutPoint, Txid};
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use log::{error, info};
 use mongodb::bson::{doc, Bson, DateTime, Document};
 use serde::Serialize;
 use std::fmt;
+
+// create active transfer struct
+pub struct Brc20ActiveTransfer {
+    pub tx_id: Txid,
+    pub vout: u32,
+    pub tick: String,
+    pub block_height: u32,
+    pub tx_height: u32,
+    pub from: Address,
+    pub amt: f64,
+    pub inscription: Brc20Inscription,
+}
+
+impl Brc20ActiveTransfer {
+    pub fn new(
+        tx_id: Txid,
+        vout: u32,
+        tick: String,
+        block_height: u32,
+        tx_height: u32,
+        from: Address,
+        amt: f64,
+        inscription: Brc20Inscription,
+    ) -> Self {
+        Brc20ActiveTransfer {
+            tx_id,
+            vout,
+            tick,
+            block_height,
+            tx_height,
+            from,
+            amt,
+            inscription,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Brc20Transfer {
@@ -54,22 +90,12 @@ impl Brc20Transfer {
         &self.inscription
     }
 
-    // set transfer tx
-    pub fn set_transfer_tx(mut self, transfer_tx: GetRawTransactionResult) -> Self {
-        self.send_tx = Some(transfer_tx);
-        self
-    }
-
     // get OutPoint
     pub fn get_inscription_outpoint(&self) -> OutPoint {
         OutPoint {
             txid: self.tx.txid.clone(),
             vout: 0,
         }
-    }
-
-    pub fn get_amount(&self) -> f64 {
-        self.amt
     }
 
     pub fn is_valid(&self) -> bool {
@@ -151,6 +177,26 @@ impl Brc20Transfer {
                         user_balance,
                     )
                     .await?;
+
+                // Create new active transfer when inscription is valid
+                let active_transfer = Brc20ActiveTransfer::new(
+                    self.tx.txid.clone(),
+                    0,
+                    self.inscription.tick.to_lowercase(),
+                    self.block_height,
+                    self.tx_height,
+                    self.from.clone(),
+                    transfer_amount,
+                    self.inscription.clone(),
+                );
+
+                // Insert Active Transfer into MongoDB
+                mongo_client
+                    .insert_document(
+                        consts::COLLECTION_BRC20_ACTIVE_TRANSFERS,
+                        active_transfer.to_document(),
+                    )
+                    .await?;
             } else {
                 // if invalid, add invalid tx and return
                 let reason = "Transfer amount exceeds available balance";
@@ -168,101 +214,6 @@ impl Brc20Transfer {
 
         Ok(())
     }
-
-    // pub async fn validate_inscribe_transfer(
-    //     &mut self,
-    //     mongo_client: &MongoClient,
-    // ) -> Result<(), Box<dyn std::error::Error>> {
-    //     let from = &self.from;
-    //     let ticker_symbol = &self.inscription.tick.to_lowercase();
-
-    //     // get ticker doc from mongo
-    //     let ticker_doc_from_mongo = mongo_client
-    //         .get_document_by_field(consts::COLLECTION_TICKERS, "tick", ticker_symbol)
-    //         .await?;
-
-    //     if ticker_doc_from_mongo.is_none() {
-    //         // Ticker not found, create invalid transaction
-    //         let reason = "Ticker not found";
-    //         error!("INVALID Transfer Inscribe: {}", reason);
-
-    //         self.insert_invalid_tx(reason, mongo_client).await?;
-
-    //         return Err(Box::new(std::io::Error::new(
-    //             std::io::ErrorKind::Other,
-    //             reason,
-    //         )));
-    //     }
-
-    //     // get the user balance from mongo
-    //     let filter = doc! {
-    //       "address": from.to_string(),
-    //       "tick": self.inscription.tick.to_lowercase(),
-    //     };
-
-    //     let user_balance_doc = mongo_client
-    //         .get_user_balance_document(consts::COLLECTION_USER_BALANCES, filter)
-    //         .await?;
-
-    //     if user_balance_doc.is_none() {
-    //         // User balance not found, create invalid transaction
-    //         let reason = "User balance not found";
-    //         error!("INVALID: {}", reason);
-
-    //         self.insert_invalid_tx(reason, mongo_client).await?;
-
-    //         return Ok(());
-    //     }
-
-    //     let user_balance = user_balance_doc.unwrap();
-    //     let available_balance = mongo_client
-    //         .get_double(&user_balance, "available_balance")
-    //         .unwrap_or_default();
-
-    //     // get transfer amount
-    //     let transfer_amount = self
-    //         .inscription
-    //         .amt
-    //         .as_ref()
-    //         .and_then(|amt_str| amt_str.parse::<f64>().ok())
-    //         .unwrap_or(0.0);
-
-    //     // check if user has enough balance to transfer
-    //     if available_balance >= transfer_amount {
-    //         println!("VALID: Transfer inscription added. From: {:#?}", from);
-
-    //         // if valid, add transfer inscription to user balance
-    //         self.is_valid = true;
-
-    //         // insert user balance entry
-    //         mongo_client
-    //             .insert_user_balance_entry(
-    //                 &self.from.to_string(),
-    //                 transfer_amount,
-    //                 &self.inscription.tick.to_lowercase(),
-    //                 self.block_height.into(),
-    //                 UserBalanceEntryType::Inscription,
-    //             )
-    //             .await?;
-
-    //         // Update the user balance document in MongoDB
-    //         mongo_client
-    //             .update_transfer_inscriber_user_balance_document(
-    //                 &from.to_string(),
-    //                 transfer_amount,
-    //                 ticker_symbol,
-    //             )
-    //             .await?;
-    //     } else {
-    //         // if invalid, add invalid tx and return
-    //         let reason = "Transfer amount exceeds available balance";
-    //         error!("INVALID: {}", reason);
-
-    //         self.insert_invalid_tx(reason, mongo_client).await?;
-    //     }
-
-    //     Ok(())
-    // }
 
     pub async fn insert_invalid_tx(
         &self,
@@ -282,11 +233,6 @@ impl Brc20Transfer {
             .await?;
 
         Ok(())
-    }
-
-    pub fn set_receiver(mut self, receiver: Address) -> Self {
-        self.to = Some(receiver);
-        self
     }
 }
 
@@ -365,6 +311,22 @@ impl ToDocument for Brc20Transfer {
             "from": self.from.to_string(),
             "to": self.to.clone().map(|addr| addr.to_string()), // Convert Option<Address> to string
             "is_valid": self.is_valid,
+            "created_at": Bson::DateTime(DateTime::now())
+        }
+    }
+}
+
+impl ToDocument for Brc20ActiveTransfer {
+    fn to_document(&self) -> Document {
+        doc! {
+            "txid": self.tx_id.to_string(),
+            "vout": self.vout,
+            "tick": &self.tick,
+            "block_height": self.block_height,
+            "tx_height": self.tx_height,
+            "from": self.from.to_string(),
+            "amt": self.amt,
+            "inscription": self.inscription.to_document(), // Assuming Brc20Inscription implements ToDocument
             "created_at": Bson::DateTime(DateTime::now())
         }
     }

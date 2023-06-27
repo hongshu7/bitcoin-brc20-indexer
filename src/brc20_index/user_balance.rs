@@ -44,70 +44,6 @@ impl UserBalance {
             mints: Vec::new(),
         }
     }
-
-    pub fn get_transferable_balance(&self) -> f64 {
-        self.active_transfer_inscriptions
-            .values()
-            .map(|inscription| inscription.get_amount())
-            .sum()
-    }
-
-    pub fn remove_inscription(&mut self, outpoint: &OutPoint) -> Option<Brc20Transfer> {
-        self.active_transfer_inscriptions.remove(&outpoint)
-    }
-
-    // get active transfer inscriptions
-    pub fn get_active_transfer_inscriptions(&self) -> &HashMap<OutPoint, Brc20Transfer> {
-        &self.active_transfer_inscriptions
-    }
-
-    // get total amount of mints
-    pub fn get_total_amount_from_mints(&self) -> f64 {
-        self.mints.iter().map(|mint| mint.get_amount()).sum::<f64>()
-    }
-
-    // get overall balance using transfer sends, transfer receives and mints
-    pub fn get_overall_balance(&self) -> f64 {
-        self.get_total_amount_from_transfer_receives() - self.get_total_amount_from_transfer_sends()
-            + self.get_total_amount_from_mints()
-    }
-
-    // get available balance using get_overall_balance_from_txs and active transfer inscriptions
-    pub fn get_available_balance(&self) -> f64 {
-        self.get_overall_balance() - self.get_transferable_balance()
-    }
-
-    // get total amount from transfer sends
-    pub fn get_total_amount_from_transfer_sends(&self) -> f64 {
-        self.transfer_sends
-            .iter()
-            .map(|transfer_send| transfer_send.get_amount())
-            .sum()
-    }
-
-    // get total amount from transfer receives
-    pub fn get_total_amount_from_transfer_receives(&self) -> f64 {
-        self.transfer_receives
-            .iter()
-            .map(|transfer_receive| transfer_receive.get_amount())
-            .sum()
-    }
-
-    pub fn add_transfer_send(&mut self, transfer_send: Brc20Transfer) {
-        self.transfer_sends.push(transfer_send);
-        self.set_balances();
-    }
-
-    pub fn add_transfer_receive(&mut self, transfer_receive: Brc20Transfer) {
-        self.transfer_receives.push(transfer_receive);
-        self.set_balances();
-    }
-
-    pub fn set_balances(&mut self) {
-        self.overall_balance = self.get_overall_balance();
-        self.available_balance = self.get_available_balance();
-        self.transferable_balance = self.get_transferable_balance();
-    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -177,16 +113,5 @@ impl From<&str> for UserBalanceEntryType {
             "receive" => UserBalanceEntryType::Receive,
             _ => panic!("Invalid UserBalanceEntryType"), // Decide how to handle invalid input
         }
-    }
-}
-
-impl fmt::Display for UserBalance {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Overall Balance: {}", self.get_overall_balance())?;
-        writeln!(f, "Active Transfer Inscriptions:")?;
-        for (outpoint, transfer_tx) in &self.active_transfer_inscriptions {
-            writeln!(f, "OutPoint: {}\n{}", outpoint, transfer_tx)?;
-        }
-        Ok(())
     }
 }

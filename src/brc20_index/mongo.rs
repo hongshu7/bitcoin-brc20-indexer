@@ -37,6 +37,19 @@ impl MongoClient {
         })
     }
 
+    pub async fn delete_document(
+        &self,
+        collection_name: &str,
+        filter: Document,
+    ) -> Result<(), mongodb::error::Error> {
+        let db = self.client.database(&self.db_name);
+        let collection = db.collection::<bson::Document>(collection_name);
+
+        collection.delete_one(filter, None).await?;
+
+        Ok(())
+    }
+
     pub async fn insert_document(
         &self,
         collection_name: &str,
@@ -186,6 +199,20 @@ impl MongoClient {
         let collection = db.collection::<bson::Document>(collection_name);
 
         let filter = doc! { field_name: field_value };
+        let result = collection.find_one(filter, None).await?;
+
+        Ok(result)
+    }
+
+    //get document by filter
+    pub async fn get_document_by_filter(
+        &self,
+        collection_name: &str,
+        filter: Document,
+    ) -> Result<Option<Document>, mongodb::error::Error> {
+        let db = self.client.database(&self.db_name);
+        let collection = db.collection::<bson::Document>(collection_name);
+
         let result = collection.find_one(filter, None).await?;
 
         Ok(result)
@@ -587,6 +614,24 @@ impl MongoClient {
         match doc.get(field) {
             Some(Bson::Int32(value)) => Some(*value),
             _ => None,
+        }
+    }
+
+    pub fn get_f64(&self, doc: &Document, field: &str) -> Option<f64> {
+        match doc.get(field) {
+            Some(Bson::Double(value)) => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub fn get_string(
+        &self,
+        doc: &Document,
+        key: &str,
+    ) -> Result<String, mongodb::bson::document::ValueAccessError> {
+        match doc.get_str(key) {
+            Ok(value) => Ok(value.to_string()),
+            Err(e) => Err(e),
         }
     }
 }

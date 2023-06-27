@@ -4,11 +4,11 @@ use self::{
     invalid_brc20::InvalidBrc20TxMap,
     mint::handle_mint_operation,
     mongo::MongoClient,
-    transfer::{handle_transfer_operation, Brc20Transfer},
+    transfer::handle_transfer_operation,
     user_balance::UserBalanceEntryType,
     utils::{extract_and_process_witness_data, get_owner_of_vout, get_witness_data_from_raw_tx},
 };
-use bitcoin::{Address, OutPoint};
+use bitcoin::{Address, OutPoint, Txid};
 use bitcoincore_rpc::bitcoincore_rpc_json::{
     GetRawTransactionResult, GetRawTransactionResultVin, GetRawTransactionResultVout,
     GetRawTransactionResultVoutScriptPubKey,
@@ -100,191 +100,145 @@ impl Brc20Index {
         let transaction = raw_tx_info.transaction()?;
 
         for (input_index, input) in transaction.input.iter().enumerate() {
-            let outpoint = input.previous_output;
-            let ticker = match self.get_active_transfer_inscription_ticker(&outpoint) {
-                Some(ticker) => ticker,
+            let txid = input.previous_output.txid;
+            let vout = input.previous_output.vout;
+            let filter_doc = doc! { "txid": txid.to_string(), "vout": vout };
+
+            // get active transfer from mongo
+            let active_transfer_doc = match mongo_client
+                .get_document_by_filter(consts::COLLECTION_BRC20_ACTIVE_TRANSFERS, filter_doc)
+                .await?
+            {
+                Some(doc) => Some(doc),
                 None => {
                     log::debug!(
-                        "No active transfer inscription for outpoint: {:?}",
-                        outpoint
+                        "Active transfer inscription not found for txid: {}, vout: {}",
+                        txid,
+                        vout
                     );
                     continue;
                 }
             };
 
-            let brc20_ticker = match self.get_ticker_mut(&ticker) {
-                Some(brc20_ticker) => brc20_ticker,
-                None => {
-                    log::error!("Inscription found but ticker {} not found", ticker);
-                    continue;
-                }
-            };
+            if let Some(_) = active_transfer_doc {
+                // Extract values from active transfer doc
+                let mut tick = String::new();
+                let mut from = String::new();
+                let mut amount = 0f64;
 
-            if !brc20_ticker.has_active_transfer_inscription(&outpoint) {
-                log::error!(
-                    "No user balance with active transfer inscription for outpoint: {:?}",
-                    outpoint
-                );
-                continue;
-            }
-
-            let brc20_transfer_tx =
-                match brc20_ticker.get_and_remove_active_transfer_inscription(&outpoint) {
-                    Some(brc20_transfer_tx) => brc20_transfer_tx,
+                // get mongo doc for transfers collection that matches the txid and vout
+                let filter_doc = doc! {"tx.txid": txid.to_string() };
+                let transfer_doc = match mongo_client
+                    .get_document_by_filter(consts::COLLECTION_TRANSFERS, filter_doc)
+                    .await?
+                {
+                    Some(doc) => Some(doc),
                     None => {
-                        log::debug!(
-                            "Active transfer inscription not found for outpoint: {:?}",
-                            outpoint
+                        log::error!(
+                            "Transfer inscription not found for txid: {}, vout: {}",
+                            txid,
+                            vout
                         );
                         continue;
                     }
                 };
 
-            // If the input is the first input, the proper vout is 0.
-            // For other inputs, calculate the proper vout by
-            // finding the vout that is greater than the sum of all input values
-            // of the inputs leading up to but not including the current one.
-            let proper_vout = if input_index > 0 {
-                // if not in first input, get values of all inputs only up to this input
-                let input_values =
-                    utils::transaction_inputs_to_values(rpc, &transaction.input[0..input_index])?;
-
-                // then get the sum these input values
-                let input_value_sum: u64 = input_values.iter().sum();
-
-                // Calculate the index of the output (vout) which is the recipient of the
-                // current input by finding the first output whose value is greater than
-                // or equal to the sum of all preceding input values. This is based on the
-                // assumption that inputs and outputs are processed in order and each input's
-                // value goes to the next output that it fully covers.
-                transaction
-                    .output
-                    .iter()
-                    .scan(0, |acc, output| {
-                        *acc += output.value;
-                        Some(*acc)
-                    })
-                    .position(|value| value >= input_value_sum)
-                    .unwrap_or(transaction.output.len() - 1)
-            } else {
-                0
-            };
-
-            let receiver_address = get_owner_of_vout(&raw_tx_info, proper_vout)?;
-            let amount = brc20_transfer_tx.get_amount();
-            let from = brc20_transfer_tx.from.clone();
-
-            let ticker_symbol = &brc20_ticker.get_ticker().clone();
-
-            // // Fetch existing balances for sender and receiver
-            // let sender_balance_doc = mongo_client
-            //     .get_user_balance_document(
-            //         consts::COLLECTION_USER_BALANCES,
-            //         doc! {
-            //             "ticker": ticker_symbol,
-            //             "address": from.to_string(),
-            //         },
-            //     )
-            //     .await?;
-
-            // let receiver_balance_doc = mongo_client
-            //     .get_user_balance_document(
-            //         consts::COLLECTION_USER_BALANCES,
-            //         doc! {
-            //             "ticker": ticker_symbol,
-            //             "address": receiver_address.to_string(),
-            //         },
-            //     )
-            //     .await?;
-
-            // update transfer struct with receiver address
-            let brc20_transfer_tx = brc20_transfer_tx
-                .set_receiver(receiver_address.clone())
-                .set_transfer_tx(raw_tx_info.clone());
-
-            // Update user overall balance and available for the from address(sender) in MongoDB
-            mongo_client
-                .insert_user_balance_entry(
-                    &from.to_string(),
-                    amount,
-                    &ticker_symbol,
-                    block_height,
-                    UserBalanceEntryType::Send,
-                )
-                .await?;
-
-            // Update user overall balance and available for the to address(receiver) in MongoDB
-            mongo_client
-                .insert_user_balance_entry(
-                    &receiver_address.to_string(),
-                    amount,
-                    &ticker_symbol,
-                    block_height,
-                    UserBalanceEntryType::Receive,
-                )
-                .await?;
-
-            // Update user balances
-            brc20_ticker
-                .update_transfer_receives(receiver_address.clone(), brc20_transfer_tx.clone());
-            brc20_ticker.update_transfer_sends(from.clone(), brc20_transfer_tx.clone());
-
-            self.remove_active_transfer_balance(&outpoint);
-
-            let send_tx = match brc20_transfer_tx.send_tx.clone() {
-                Some(send_tx) => send_tx,
-                None => {
-                    log::error!("No send tx found for transfer tx: {:?}", brc20_transfer_tx);
-                    continue;
+                if let Some(transfer_doc) = transfer_doc {
+                    // Extract values from transfer doc
+                    tick = mongo_client
+                        .get_string(&transfer_doc, "inscription.tick")?
+                        .to_string();
+                    from = mongo_client.get_string(&transfer_doc, "from")?.to_string();
+                    amount = match mongo_client.get_f64(&transfer_doc, "amt") {
+                        Some(amt) => amt,
+                        None => 0.0,
+                    };
                 }
-            };
 
-            //-------------MONGODB-------------------//
-            // Update the transfer document in MongoDB
-            update_transfer_document(
-                mongo_client,
-                &brc20_transfer_tx,
-                &receiver_address,
-                &send_tx,
-            )
-            .await?;
+                let proper_vout = if input_index > 0 {
+                    // if not in first input, get values of all inputs only up to this input
+                    let input_values = utils::transaction_inputs_to_values(
+                        rpc,
+                        &transaction.input[0..input_index],
+                    )?;
 
-            // Update user available and transferable balance for the sender in MongoDB
-            mongo_client
-                .update_sender_user_balance_document(&from.to_string(), amount, &ticker_symbol)
-                .await?;
+                    // then get the sum these input values
+                    let input_value_sum: u64 = input_values.iter().sum();
 
-            // Update user overall balance for the receiver in MongoDB
-            mongo_client
-                .update_receiver_balance_document(
-                    &receiver_address.to_string(),
-                    amount,
-                    &ticker_symbol,
-                )
-                .await?;
+                    // Calculate the index of the output (vout) which is the recipient of the
+                    // current input by finding the first output whose value is greater than
+                    // or equal to the sum of all preceding input values. This is based on the
+                    // assumption that inputs and outputs are processed in order and each input's
+                    // value goes to the next output that it fully covers.
+                    transaction
+                        .output
+                        .iter()
+                        .scan(0, |acc, output| {
+                            *acc += output.value;
+                            Some(*acc)
+                        })
+                        .position(|value| value >= input_value_sum)
+                        .unwrap_or(transaction.output.len() - 1)
+                } else {
+                    0
+                };
+
+                let receiver_address = get_owner_of_vout(&raw_tx_info, proper_vout)?;
+
+                // Update user overall balance and available for the from address(sender) in MongoDB
+                mongo_client
+                    .insert_user_balance_entry(
+                        &from.to_string(),
+                        amount,
+                        &tick,
+                        block_height,
+                        UserBalanceEntryType::Send,
+                    )
+                    .await?;
+
+                // Update user overall balance and available for the to address(receiver) in MongoDB
+                mongo_client
+                    .insert_user_balance_entry(
+                        &receiver_address.to_string(),
+                        amount,
+                        &tick,
+                        block_height,
+                        UserBalanceEntryType::Receive,
+                    )
+                    .await?;
+
+                //-------------MONGODB-------------------//
+                // Update the transfer document in MongoDB
+                update_transfer_document(mongo_client, &txid, &receiver_address, &raw_tx_info)
+                    .await?;
+
+                // Update user available and transferable balance for the sender in MongoDB
+                mongo_client
+                    .update_sender_user_balance_document(&from.to_string(), amount, &tick)
+                    .await?;
+
+                // Update user overall balance for the receiver in MongoDB
+                mongo_client
+                    .update_receiver_balance_document(&receiver_address.to_string(), amount, &tick)
+                    .await?;
+
+                // Delete the active transfer document from MongoDB
+                let filter_doc = doc! { "txid": txid.to_string(), "vout": vout };
+                mongo_client
+                    .delete_document(consts::COLLECTION_BRC20_ACTIVE_TRANSFERS, filter_doc)
+                    .await?;
+            } else {
+                log::debug!("No active transfer for txid: {:?}, vout: {}", txid, vout);
+                continue;
+            }
         }
 
         Ok(())
     }
 
-    //Method to remove a ticker for a given outpoint
-    pub fn remove_active_transfer_balance(&mut self, outpoint: &OutPoint) {
-        self.active_transfer_inscriptions.remove(outpoint);
-    }
-
-    //method to return a ticker String for a given outpoint
-    pub fn get_active_transfer_inscription_ticker(&self, outpoint: &OutPoint) -> Option<String> {
-        self.active_transfer_inscriptions.get(outpoint).cloned()
-    }
-
     // Method to add a ticker for a given txid and vout
     pub fn update_active_transfer_inscription(&mut self, outpoint: OutPoint, ticker: String) {
         self.active_transfer_inscriptions.insert(outpoint, ticker);
-    }
-
-    //get a mutable ticker struct for a given ticker string
-    pub fn get_ticker_mut(&mut self, ticker: &str) -> Option<&mut Brc20Ticker> {
-        self.tickers.get_mut(ticker)
     }
 }
 
@@ -532,7 +486,7 @@ impl ToDocument for GetRawTransactionResultVout {
 // This function will update the transfer document in MongoDB with receiver and send_tx
 pub async fn update_transfer_document(
     mongo_client: &MongoClient,
-    brc20_transfer_tx: &Brc20Transfer,
+    tx_id: &Txid,
     receiver_address: &Address,
     send_tx: &GetRawTransactionResult,
 ) -> Result<(), anyhow::Error> {
@@ -548,7 +502,7 @@ pub async fn update_transfer_document(
         .update_document_by_field(
             consts::COLLECTION_TRANSFERS,
             "tx.txid",
-            &brc20_transfer_tx.tx.txid.to_string(),
+            &tx_id.to_string(),
             update_doc,
         )
         .await?;
