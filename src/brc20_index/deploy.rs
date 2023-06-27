@@ -1,14 +1,14 @@
-use super::invalid_brc20::{InvalidBrc20Tx, InvalidBrc20TxMap};
+use super::invalid_brc20::InvalidBrc20Tx;
 use super::mongo::MongoClient;
+use super::ToDocument;
 use super::{brc20_ticker::Brc20Ticker, utils::convert_to_float, Brc20Inscription};
-use super::{Brc20Index, ToDocument};
 use crate::brc20_index::consts;
 use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use log::{error, info};
-use mongodb::bson::{doc, Document};
+use mongodb::bson::{doc, Bson, DateTime, Document};
 use serde::Serialize;
-use std::{collections::HashMap, fmt};
+use std::fmt;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Brc20Deploy {
@@ -77,14 +77,15 @@ impl Brc20Deploy {
 
     pub async fn validate_deploy_script(
         mut self,
-        invalid_tx_map: &mut InvalidBrc20TxMap,
-        ticker_map: &HashMap<String, Brc20Ticker>,
         mongo_client: &MongoClient,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let ticker_symbol = self.inscription.tick.to_lowercase();
         let mut reasons = vec![];
 
-        match self.validate_ticker_symbol(&ticker_symbol, ticker_map) {
+        match self
+            .validate_ticker_symbol(&ticker_symbol, mongo_client)
+            .await
+        {
             Ok(_) => {}
             Err(reason) => {
                 error!("INVALID: {}", reason);
@@ -128,8 +129,8 @@ impl Brc20Deploy {
                 valid_deploy_tx.tx.txid,
                 valid_deploy_tx.inscription.clone(),
                 reason,
+                valid_deploy_tx.block_height,
             );
-            invalid_tx_map.add_invalid_tx(invalid_tx.clone());
 
             // insert invalid deploy tx into mongodb
             mongo_client
@@ -140,12 +141,18 @@ impl Brc20Deploy {
         Ok(valid_deploy_tx)
     }
 
-    fn validate_ticker_symbol(
+    async fn validate_ticker_symbol(
         &self,
         ticker_symbol: &String,
-        ticker_map: &HashMap<String, Brc20Ticker>,
+        mongo_client: &MongoClient,
     ) -> Result<(), String> {
-        if ticker_map.contains_key(ticker_symbol) {
+        //check if ticker symbol already exists in MongoDB
+        let ticker_exists = mongo_client
+            .ticker_exists(consts::COLLECTION_TICKERS, doc! { "tick": ticker_symbol })
+            .await
+            .map_err(|e| e.to_string())?; // Convert mongodb::error::Error to String
+
+        if ticker_exists {
             Err("Ticker symbol already exists".to_string())
         } else if self.inscription.tick.chars().count() != 4 {
             Err("Ticker symbol must be 4 characters long".to_string())
@@ -218,6 +225,7 @@ impl ToDocument for Brc20Deploy {
             "tx": &self.tx.to_document(),
             "inscription": &self.inscription.to_document(),
             "is_valid": &self.is_valid,
+            "created_at": Bson::DateTime(DateTime::now())
         }
     }
 }
@@ -229,15 +237,10 @@ pub async fn handle_deploy_operation(
     owner: Address,
     block_height: u32,
     tx_height: u32,
-    brc20_index: &mut Brc20Index,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // if invalid vaiidate_deploy_script handles and adds invalid to mongodb
     let validated_deploy_tx = Brc20Deploy::new(raw_tx, inscription, block_height, tx_height, owner)
-        .validate_deploy_script(
-            &mut brc20_index.invalid_tx_map,
-            &brc20_index.tickers,
-            &mongo_client,
-        )
+        .validate_deploy_script(&mongo_client)
         .await?;
 
     if validated_deploy_tx.is_valid() {
@@ -249,9 +252,6 @@ pub async fn handle_deploy_operation(
         // A valid deploy means new BRC20Ticker to MongoDB
         // Instantiate a new `Brc20Ticker` struct and update the hashmap with the deploy information.
         let ticker = Brc20Ticker::new(validated_deploy_tx.clone());
-        brc20_index
-            .tickers
-            .insert(ticker.get_ticker(), ticker.clone());
 
         // Insert ticker into MongoDB
         mongo_client
@@ -270,9 +270,6 @@ pub async fn handle_deploy_operation(
             "Invalid deploy: {:?}",
             validated_deploy_tx.get_deploy_script()
         );
-
-        //do we want to store the deploy struct even if it is invalid?
-        // we already have inserted invaliid tx into mongodb
     }
 
     Ok(())

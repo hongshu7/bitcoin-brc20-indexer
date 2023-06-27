@@ -1,17 +1,15 @@
+use crate::brc20_index::user_balance::UserBalanceEntryType;
+
 use super::{
-    brc20_ticker::Brc20Ticker,
-    consts,
-    invalid_brc20::{InvalidBrc20Tx, InvalidBrc20TxMap},
-    mongo::MongoClient,
-    utils::convert_to_float,
-    Brc20Index, Brc20Inscription, ToDocument,
+    consts, invalid_brc20::InvalidBrc20Tx, mongo::MongoClient, utils::convert_to_float,
+    Brc20Inscription, ToDocument,
 };
 use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use log::{error, info};
-use mongodb::bson::{doc, Bson, Document};
+use mongodb::bson::{doc, Bson, DateTime, Document};
 use serde::Serialize;
-use std::{collections::HashMap, fmt};
+use std::fmt;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Brc20Mint {
@@ -35,6 +33,7 @@ impl ToDocument for Brc20Mint {
             "tx": self.tx.to_document(),
             "inscription": self.inscription.to_document(),
             "is_valid": self.is_valid,
+            "created_at": Bson::DateTime(DateTime::now())
         }
     }
 }
@@ -58,10 +57,6 @@ impl Brc20Mint {
         }
     }
 
-    pub fn get_amount(&self) -> f64 {
-        self.amt
-    }
-
     pub fn is_valid(&self) -> bool {
         self.is_valid
     }
@@ -72,23 +67,41 @@ impl Brc20Mint {
 
     pub async fn validate_mint<'a>(
         mut self,
-        ticker_map: &'a mut HashMap<String, Brc20Ticker>,
-        invalid_tx_map: &'a mut InvalidBrc20TxMap,
         mongo_client: &MongoClient,
     ) -> Result<Brc20Mint, Box<dyn std::error::Error>> {
-        let mut is_valid = false;
         let mut reason = String::new();
 
-        if let Some(ticker) = ticker_map.get(&self.inscription.tick.to_lowercase()) {
-            //TODO: get these values from db
-            let limit = ticker.get_limit();
-            let max_supply = ticker.get_max_supply();
-            let total_minted = ticker.get_total_supply();
+        // get ticker doc from mongo
+        let ticker_doc_from_mongo = mongo_client
+            .get_document_by_field(
+                consts::COLLECTION_TICKERS,
+                "tick",
+                &self.inscription.tick.to_lowercase(),
+            )
+            .await?;
+
+        if let Some(ticker_doc) = ticker_doc_from_mongo {
+            // get values from ticker doc
+            let limit = mongo_client
+                .get_double(&ticker_doc, "limit")
+                .unwrap_or_default();
+            let max_supply = mongo_client
+                .get_double(&ticker_doc, "max_supply")
+                .unwrap_or_default();
+            let total_minted = mongo_client
+                .get_double(&ticker_doc, "total_minted")
+                .unwrap_or_default();
+            let decimals = mongo_client
+                .get_i32(&ticker_doc, "decimals")
+                .unwrap_or_default();
+
+            // get amount from inscription
             let amount = match self.inscription.amt.as_ref().map(String::as_str) {
-                Some(amt_str) => convert_to_float(amt_str, ticker.get_decimals()),
+                Some(amt_str) => convert_to_float(amt_str, decimals.try_into().unwrap()),
                 None => Ok(0.0),
             };
 
+            // validate mint amount against ticker limit and max supply
             match amount {
                 Ok(amount) => {
                     // Check if the amount is greater than the limit
@@ -96,15 +109,15 @@ impl Brc20Mint {
                         reason = "Mint amount exceeds limit".to_string();
                     // Check if total minted is already greater than or equal to max supply
                     } else if total_minted >= max_supply {
-                        reason = "Total minted is already at or exceeds max supply".to_string();
+                        reason = "Total minted is already at max supply".to_string();
                     // Check if the total minted amount + requested mint amount exceeds the max supply
                     } else if total_minted + amount > max_supply {
-                        is_valid = true;
-                        // Adjust the mint amount to mint the remaining tokens
+                        self.is_valid = true;
+                        // Adjust the mint amount to mint remaining tokens
                         let remaining_amount = max_supply - total_minted;
                         self.amt = remaining_amount;
                     } else {
-                        is_valid = true;
+                        self.is_valid = true;
                         self.amt = amount;
                     }
                 }
@@ -115,36 +128,116 @@ impl Brc20Mint {
         } else {
             reason = "Ticker symbol does not exist".to_string();
         }
-
-        if !is_valid {
-            // Set is_valid to false when the transaction is invalid
+        // handle invalid mint transaction
+        if !self.is_valid {
             error!("INVALID: {}", reason);
 
-            // Add the invalid mint transaction to the invalid transaction map
-            let invalid_tx = InvalidBrc20Tx::new(self.tx.txid, self.inscription.clone(), reason);
-            invalid_tx_map.add_invalid_tx(invalid_tx.clone());
-
             // Insert the invalid mint inscription into MongoDB
+            let invalid_tx = InvalidBrc20Tx::new(
+                self.tx.txid,
+                self.inscription.clone(),
+                reason,
+                self.block_height,
+            );
+
             mongo_client
                 .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
                 .await?;
-        } else {
-            // Set is_valid to true when the transaction is valid
-            println!("VALID: Mint inscription added: {:#?}", self.inscription);
-            self.is_valid = is_valid;
-
-            //get ticker for this mint
-            let ticker = ticker_map
-                .get_mut(&self.inscription.tick.to_lowercase())
-                .unwrap();
-
-            ticker
-                .add_mint_to_ticker(self.clone(), mongo_client)
-                .await?;
         }
-        // Return the updated mint transaction, which might be valid or invalid
+
         Ok(self)
     }
+}
+
+pub async fn validate_and_insert_mint(
+    mongo_client: &MongoClient,
+    block_height: u32,
+    tx_height: u32,
+    owner: Address,
+    inscription: Brc20Inscription,
+    raw_tx: &GetRawTransactionResult,
+) -> Result<Brc20Mint, Box<dyn std::error::Error>> {
+    let validated_mint_tx = Brc20Mint::new(&raw_tx, inscription, block_height, tx_height, owner)
+        .validate_mint(mongo_client)
+        .await?;
+
+    if validated_mint_tx.is_valid() {
+        // Add the mint transaction to the mongo database
+        mongo_client
+            .insert_document(consts::COLLECTION_MINTS, validated_mint_tx.to_document())
+            .await?;
+    }
+
+    Ok(validated_mint_tx)
+}
+
+pub async fn update_balances_and_ticker(
+    mongo_client: &MongoClient,
+    validated_mint_tx: &Brc20Mint,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if validated_mint_tx.is_valid() {
+        // Insert user balance entry into MongoDB
+        mongo_client
+            .insert_user_balance_entry(
+                &validated_mint_tx.to.to_string(),
+                validated_mint_tx.amt,
+                &validated_mint_tx.inscription.tick.to_lowercase(),
+                validated_mint_tx.block_height.into(),
+                UserBalanceEntryType::Receive,
+            )
+            .await?;
+
+        // Update user overall balance and available for the receiver in MongoDB
+        mongo_client
+            .update_receiver_balance_document(
+                &validated_mint_tx.to.to_string(),
+                validated_mint_tx.amt,
+                &validated_mint_tx.inscription.tick.to_lowercase(),
+            )
+            .await?;
+
+        // Update total minted tokens for this ticker in MongoDB
+        mongo_client
+            .update_brc20_ticker_total_minted(
+                &validated_mint_tx.inscription.tick.to_lowercase(),
+                validated_mint_tx.amt,
+            )
+            .await?;
+    }
+
+    Ok(())
+}
+
+pub async fn handle_mint_operation(
+    mongo_client: &MongoClient,
+    block_height: u32,
+    tx_height: u32,
+    owner: Address,
+    inscription: Brc20Inscription,
+    raw_tx: &GetRawTransactionResult,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let validated_mint_tx = validate_and_insert_mint(
+        mongo_client,
+        block_height,
+        tx_height,
+        owner,
+        inscription,
+        raw_tx,
+    )
+    .await?;
+
+    // Check if the mint operation is valid.
+    if validated_mint_tx.is_valid() {
+        info!(
+            "VALID: Mint inscription added: {}",
+            validated_mint_tx.get_mint()
+        );
+        info!("TO Address: {:?}", validated_mint_tx.to);
+
+        update_balances_and_ticker(mongo_client, &validated_mint_tx).await?;
+    }
+
+    Ok(())
 }
 
 impl fmt::Display for Brc20Mint {
@@ -155,79 +248,4 @@ impl fmt::Display for Brc20Mint {
         writeln!(f, "Is Valid: {}", self.is_valid)?;
         Ok(())
     }
-}
-
-pub async fn handle_mint_operation(
-    mongo_client: &MongoClient,
-    block_height: u32,
-    tx_height: u32,
-    owner: Address,
-    inscription: Brc20Inscription,
-    raw_tx: &GetRawTransactionResult,
-    brc20_index: &mut Brc20Index,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let validated_mint_tx = Brc20Mint::new(&raw_tx, inscription, block_height, tx_height, owner)
-        .validate_mint(
-            &mut brc20_index.tickers,
-            &mut brc20_index.invalid_tx_map,
-            mongo_client,
-        )
-        .await?;
-
-    // Check if the mint operation is valid.
-    if validated_mint_tx.is_valid() {
-        info!("Mint: {:?}", validated_mint_tx.get_mint());
-        info!("TO Address: {:?}", validated_mint_tx.to);
-
-        let amount = validated_mint_tx.get_amount();
-
-        //---------------MONGO DOB-----------------//
-        // Add the mint transaction to the mongo database
-        mongo_client
-            .insert_document(consts::COLLECTION_MINTS, validated_mint_tx.to_document())
-            .await?;
-
-        // retrieve ticker struct from mongodb
-        let ticker_doc_from_mongo = mongo_client
-            .get_document_by_field(
-                consts::COLLECTION_TICKERS,
-                "tick",
-                &validated_mint_tx.inscription.tick.to_lowercase(),
-            )
-            .await?;
-
-        if let Some(mut ticker_doc) = ticker_doc_from_mongo {
-            // get ticker from ticker map
-            let ticker_from_map = brc20_index
-                .tickers
-                .get(&validated_mint_tx.inscription.tick.to_lowercase())
-                .unwrap();
-
-            if let Some(total_minted) = ticker_doc.get("total_minted") {
-                if let Bson::Double(val) = total_minted {
-                    ticker_doc.insert("total_minted", Bson::Double(val + amount));
-                }
-            }
-
-            let update_doc = doc! {
-                "$set": {
-                    "total_minted": ticker_doc.get("total_minted").unwrap_or_else(|| &Bson::Double(0.0)),
-                }
-            };
-
-            // update ticker struct in mongodb
-            mongo_client
-                .update_document_by_field(
-                    consts::COLLECTION_TICKERS,
-                    "total_minted",
-                    &ticker_from_map.get_total_supply().to_string(),
-                    update_doc,
-                )
-                .await?;
-        } else {
-            error!("Ticker not found in MongoDB");
-        }
-    }
-
-    Ok(())
 }

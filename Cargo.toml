@@ -18,3 +18,4 @@ serde = {version = "1.0.164", features = ["derive"] }
 anyhow = "1.0.71"
 mongodb = "2.5.0"
 consulrs = "0.1.0"
+futures-util = "0.3.28"

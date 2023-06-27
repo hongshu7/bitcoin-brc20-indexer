@@ -203,6 +203,7 @@ dependencies = [
  "consulrs",
  "dotenv",
  "env_logger",
+ "futures-util",
  "hex",
  "log",
  "mongodb",
