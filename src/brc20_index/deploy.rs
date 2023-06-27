@@ -253,9 +253,6 @@ pub async fn handle_deploy_operation(
         // A valid deploy means new BRC20Ticker to MongoDB
         // Instantiate a new `Brc20Ticker` struct and update the hashmap with the deploy information.
         let ticker = Brc20Ticker::new(validated_deploy_tx.clone());
-        brc20_index
-            .tickers
-            .insert(ticker.get_ticker(), ticker.clone());
 
         // Insert ticker into MongoDB
         mongo_client
