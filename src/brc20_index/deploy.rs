@@ -132,9 +132,6 @@ impl Brc20Deploy {
                 valid_deploy_tx.block_height,
             );
 
-            //inserts invalid deploy tx into rust memory
-            // invalid_tx_map.add_invalid_tx(invalid_tx.clone());
-
             // insert invalid deploy tx into mongodb
             mongo_client
                 .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
