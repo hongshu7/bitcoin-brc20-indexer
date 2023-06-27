@@ -355,7 +355,6 @@ pub async fn index_brc20(
                                                 owner.clone(),
                                                 current_block_height,
                                                 tx_height,
-                                                &mut brc20_index,
                                             )
                                             .await
                                             {

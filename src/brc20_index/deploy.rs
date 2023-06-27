@@ -1,7 +1,7 @@
 use super::invalid_brc20::InvalidBrc20Tx;
 use super::mongo::MongoClient;
+use super::ToDocument;
 use super::{brc20_ticker::Brc20Ticker, utils::convert_to_float, Brc20Inscription};
-use super::{Brc20Index, ToDocument};
 use crate::brc20_index::consts;
 use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
@@ -237,7 +237,6 @@ pub async fn handle_deploy_operation(
     owner: Address,
     block_height: u32,
     tx_height: u32,
-    brc20_index: &mut Brc20Index,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // if invalid vaiidate_deploy_script handles and adds invalid to mongodb
     let validated_deploy_tx = Brc20Deploy::new(raw_tx, inscription, block_height, tx_height, owner)
