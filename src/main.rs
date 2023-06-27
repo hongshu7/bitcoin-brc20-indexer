@@ -128,6 +128,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             consts::COLLECTION_INVALIDS,
             consts::COLLECTION_TICKERS,
             consts::COLLECTION_USER_BALANCE_ENTRY,
+            consts::COLLECTION_BRC20_ACTIVE_TRANSFERS,
         ];
 
         for collection in collections {

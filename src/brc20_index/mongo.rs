@@ -589,7 +589,7 @@ impl MongoClient {
         Ok(())
     }
 
-    pub async fn collection_exists(
+    pub async fn ticker_exists(
         &self,
         collection: &str,
         filter: Document,

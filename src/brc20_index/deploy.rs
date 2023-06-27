@@ -148,7 +148,7 @@ impl Brc20Deploy {
     ) -> Result<(), String> {
         //check if ticker symbol already exists in MongoDB
         let ticker_exists = mongo_client
-            .collection_exists(consts::COLLECTION_TICKERS, doc! { "ticker": ticker_symbol })
+            .ticker_exists(consts::COLLECTION_TICKERS, doc! { "tick": ticker_symbol })
             .await
             .map_err(|e| e.to_string())?; // Convert mongodb::error::Error to String
 
