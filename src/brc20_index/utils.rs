@@ -131,15 +131,11 @@ pub fn transaction_inputs_to_values(client: &Client, inputs: &[TxIn]) -> anyhow:
         );
 
         let prev_tx_info = client.get_raw_transaction_info(&prev_output.txid, None)?;
-
         let prev_tx = prev_tx_info.transaction()?;
-
         let output = &prev_tx.output[usize::try_from(prev_output.vout).unwrap()];
 
-        // Add both the address and the value of the output to the list
+        // Add the value of the output to the list
         values.push(output.value);
-
-        println!("=====");
     }
 
     if values.is_empty() {

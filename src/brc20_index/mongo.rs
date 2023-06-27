@@ -578,4 +578,18 @@ impl MongoClient {
 
         Ok(())
     }
+
+    pub async fn collection_exists(
+        &self,
+        collection: &str,
+        filter: Document,
+    ) -> Result<bool, mongodb::error::Error> {
+        let db = self.client.database(&self.db_name);
+        let collection = db.collection::<bson::Document>(collection);
+        match collection.find_one(filter, None).await {
+            Ok(Some(_)) => Ok(true),
+            Ok(None) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
 }
