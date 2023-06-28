@@ -291,7 +291,6 @@ impl MongoClient {
         block_height: u64,
         entry_type: UserBalanceEntryType,
     ) -> Result<(), anyhow::Error> {
-        println!("insert_user_balance_entry");
         // instantiate a new user balance entry
         let user_balance_entry = UserBalanceEntry::new(
             address.to_string(),
@@ -300,8 +299,6 @@ impl MongoClient {
             amount,
             entry_type,
         );
-
-        println!("user_balance_entry: {:?}", user_balance_entry);
 
         // Insert the new document into the MongoDB collection
         self.insert_new_document(
