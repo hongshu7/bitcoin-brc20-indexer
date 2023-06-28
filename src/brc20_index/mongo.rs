@@ -88,7 +88,6 @@ impl MongoClient {
                             .insert(consts::TRANSFERABLE_BALANCE, Bson::Double(val - amount));
                     }
                 }
-                println!("from update_sender_user_balance_document");
 
                 let update_doc = doc! {
                     "$set": {
