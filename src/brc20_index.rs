@@ -102,9 +102,20 @@ impl Brc20Index {
 
         for (input_index, input) in transaction.input.iter().enumerate() {
             let txid = input.previous_output.txid.to_string();
-            let vout = input.previous_output.vout;
+            let vout = input.previous_output.vout as i64;
 
-            let key = (txid.clone(), vout as i64);
+            let key = (txid.clone(), vout);
+
+            if !active_transfers.is_empty() {
+                //print active transfer hashmap
+                println!(
+                    "active_transfers: {:?}, now blockheight: {}, txid: {}, vout: {}",
+                    active_transfers, block_height, txid, vout
+                );
+                log::debug!("No active transfers found");
+            } else {
+                continue;
+            }
 
             // Check if active transfer exists in the HashMap
             if !active_transfers.contains_key(&key) {
@@ -118,18 +129,13 @@ impl Brc20Index {
                 active_transfers.remove(&key);
             }
 
-            // Extract values from active transfer doc
-            let mut tick = String::new();
-            let mut from = String::new();
-            let mut amount = 0f64;
-
             // get mongo doc for transfers collection that matches the txid and vout
             let filter_doc = doc! {"tx.txid": txid.to_string() };
             let transfer_doc = match mongo_client
                 .get_document_by_filter(consts::COLLECTION_TRANSFERS, filter_doc)
                 .await?
             {
-                Some(doc) => Some(doc),
+                Some(doc) => doc,
                 None => {
                     log::error!(
                         "Transfer inscription not found for txid: {}, vout: {}",
@@ -139,18 +145,31 @@ impl Brc20Index {
                     continue;
                 }
             };
+            println!("transfer_doc: {:?}", transfer_doc);
 
-            if let Some(transfer_doc) = transfer_doc {
-                // Extract values from transfer doc
-                tick = mongo_client
-                    .get_string(&transfer_doc, "inscription.tick")?
-                    .to_string();
-                from = mongo_client.get_string(&transfer_doc, "from")?.to_string();
-                amount = match mongo_client.get_f64(&transfer_doc, "amt") {
-                    Some(amt) => amt,
-                    None => 0.0,
-                };
+            let mut tick = String::new();
+            if let Some(inscription) = transfer_doc.get_document("inscription").ok() {
+                if let Some(tck) = inscription.get_str("tick").ok() {
+                    tick = tck.to_string();
+                    println!("tick: {}", tick);
+                } else {
+                    println!("Failed to get 'tick' field from 'inscription'");
+                }
+            } else {
+                println!("Failed to get 'inscription' document");
             }
+
+            // Extract values from transfer doc
+            println!("tick: {}", tick);
+
+            let from = mongo_client.get_string(&transfer_doc, "from")?;
+            println!("tick: {}, from: {}", tick, from);
+            let amount = match mongo_client.get_f64(&transfer_doc, "amt") {
+                Some(amt) => amt,
+                None => 0.0,
+            };
+
+            println!("tick: {}, from: {}, amount: {}", tick, from, amount);
 
             let proper_vout = if input_index > 0 {
                 // if not in first input, get values of all inputs only up to this input
@@ -183,7 +202,7 @@ impl Brc20Index {
             // Update user overall balance and available for the from address(sender) in MongoDB
             mongo_client
                 .insert_user_balance_entry(
-                    &from.to_string(),
+                    &from,
                     amount,
                     &tick,
                     block_height,
