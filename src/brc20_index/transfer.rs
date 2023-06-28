@@ -8,7 +8,7 @@ use serde::Serialize;
 use std::{collections::HashMap, fmt};
 
 // create active transfer struct
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct Brc20ActiveTransfer {
     pub tx_id: String,
     pub vout: i64,
