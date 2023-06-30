@@ -1,5 +1,4 @@
 use self::{
-    brc20_ticker::Brc20Ticker,
     deploy::handle_deploy_operation,
     mint::handle_mint_operation,
     mongo::MongoClient,
@@ -28,70 +27,11 @@ mod transfer;
 pub mod user_balance;
 mod utils;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Brc20Inscription {
-    pub p: String,
-    pub op: String,
-    pub tick: String,
-    pub amt: Option<String>,
-    pub max: Option<String>,
-    pub lim: Option<String>,
-    pub dec: Option<String>,
-}
-
-trait ToDocument {
-    fn to_document(&self) -> Document;
-}
-
-impl ToDocument for Brc20Inscription {
-    fn to_document(&self) -> Document {
-        doc! {
-            "p": &self.p,
-            "op": &self.op,
-            "tick": &self.tick.to_lowercase(),
-            "amt": &self.amt,
-            "max": &self.max,
-            "lim": &self.lim,
-            "dec": &self.dec,
-        }
-    }
-}
-
-//implement Display for Brc20Inscription
-impl std::fmt::Display for Brc20Inscription {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "p: {}, op: {}, tick: {}, amt: {:?}, max: {:?}, lim: {:?}, dec: {:?}",
-            self.p, self.op, self.tick, self.amt, self.max, self.lim, self.dec
-        )
-    }
-}
-
-// Brc20Index is a struct that represents
-// all Brc 20 Tickers and invalid Brc 20 Txs.
-#[derive(Debug)]
-pub struct Brc20Index {
-    // The BRC-20 tickers.
-    pub tickers: HashMap<String, Brc20Ticker>,
-}
-
-impl Brc20Index {
-    pub fn new() -> Self {
-        Brc20Index {
-            tickers: HashMap::new(),
-        }
-    }
-}
-
 pub async fn index_brc20(
     rpc: &Client,
     mongo_client: &MongoClient,
     start_block_height: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Instantiate a new `Brc20Index` struct.
-    let mut brc20_index = Brc20Index::new();
-
     let mut current_block_height = start_block_height;
 
     loop {
@@ -412,6 +352,46 @@ pub async fn check_for_transfer_send(
     }
 
     Ok(())
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Brc20Inscription {
+    pub p: String,
+    pub op: String,
+    pub tick: String,
+    pub amt: Option<String>,
+    pub max: Option<String>,
+    pub lim: Option<String>,
+    pub dec: Option<String>,
+}
+
+trait ToDocument {
+    fn to_document(&self) -> Document;
+}
+
+impl ToDocument for Brc20Inscription {
+    fn to_document(&self) -> Document {
+        doc! {
+            "p": &self.p,
+            "op": &self.op,
+            "tick": &self.tick.to_lowercase(),
+            "amt": &self.amt,
+            "max": &self.max,
+            "lim": &self.lim,
+            "dec": &self.dec,
+        }
+    }
+}
+
+//implement Display for Brc20Inscription
+impl std::fmt::Display for Brc20Inscription {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "p: {}, op: {}, tick: {}, amt: {:?}, max: {:?}, lim: {:?}, dec: {:?}",
+            self.p, self.op, self.tick, self.amt, self.max, self.lim, self.dec
+        )
+    }
 }
 
 impl ToDocument for GetRawTransactionResult {
