@@ -76,10 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     info!("Connected to Bitcoin Core");
 
-    //MongoDB connection
-    //TODO: This is connecting to Consul to get the MONGO_HOST, this should be refactorered to get ALL
-    // the variables we need from consul in one place in the codebase and set CONSTANT variables for these.
-
+    //MongoDB connection string
     let mongo_host = json_value
         .get("mongo_rc")
         .unwrap_or_else(|| panic!("MONGO_RC IS NOT SET"));
@@ -143,7 +140,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         //recalculate total_minted for each ticker
         info!("Recalculating total_minted for all tickers...");
-        match mongo_client.update_ticker_totals(start_block_height).await {
+        info!(
+            "Start block_height for update tickers: {}",
+            start_block_height - 1
+        );
+        match mongo_client
+            .update_ticker_totals(start_block_height - 1)
+            .await
+        {
             Ok(_) => info!("Recalculation complete."),
             Err(e) => info!("Error recalculating total_minted for all tickers: {:?}", e),
         };
