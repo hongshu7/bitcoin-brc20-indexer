@@ -1,7 +1,5 @@
-extern crate bitcoincore_rpc;
-extern crate serde_json;
-use std::env;
-
+use crate::brc20_index::{consts, mongo::MongoClient};
+use bitcoincore_rpc;
 use bitcoincore_rpc::{Auth, Client};
 use brc20_index::index_brc20;
 use consulrs::{
@@ -9,10 +7,10 @@ use consulrs::{
     kv,
 };
 use dotenv::dotenv;
-use log::info;
+use log::{error, info};
+use serde_json;
 use serde_json::Value;
-
-use crate::brc20_index::{consts, mongo::MongoClient};
+use std::env;
 
 mod brc20_index;
 
@@ -162,12 +160,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
     }
 
-    //TODO: Rebuild rust memory from db only
-
     // LFG!
     match index_brc20(&rpc, &mongo_client, start_block_height.try_into().unwrap()).await {
         Ok(_) => info!("Finished indexing BRC20 tokens"),
-        Err(e) => info!("Error indexing BRC20 tokens: {:?}", e),
+        Err(e) => error!("Error indexing BRC20 tokens: {:?}", e),
     };
 
     Ok(())

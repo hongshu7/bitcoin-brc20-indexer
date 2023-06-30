@@ -24,7 +24,7 @@ mod invalid_brc20;
 mod mint;
 pub mod mongo;
 mod transfer;
-pub mod user_balance;
+mod user_balance;
 mod utils;
 
 pub async fn index_brc20(
