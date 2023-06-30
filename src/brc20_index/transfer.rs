@@ -194,7 +194,11 @@ impl Brc20Transfer {
 
         // Insert the invalid transaction into MongoDB
         mongo_client
-            .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
+            .insert_document(
+                consts::COLLECTION_INVALIDS,
+                invalid_tx.to_document(),
+                consts::MONGO_RETRIES,
+            )
             .await?;
 
         Ok(())
@@ -230,6 +234,7 @@ pub async fn handle_transfer_operation(
             .insert_document(
                 consts::COLLECTION_TRANSFERS,
                 validated_transfer_tx.to_document(),
+                consts::MONGO_RETRIES,
             )
             .await?;
 

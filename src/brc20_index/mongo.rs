@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::env;
+use std::time::Duration;
 
 use super::transfer::Brc20ActiveTransfer;
 use super::user_balance::{UserBalanceEntry, UserBalanceEntryType};
@@ -39,20 +40,49 @@ impl MongoClient {
         })
     }
 
+    // pub async fn insert_document(
+    //     &self,
+    //     collection_name: &str,
+    //     document: bson::Document,
+    // ) -> Result<(), mongodb::error::Error> {
+    //     let db = self.client.database(&self.db_name);
+    //     let collection = db.collection::<bson::Document>(collection_name);
+
+    //     collection
+    //         .insert_one(document, None)
+    //         .await
+    //         .expect("Could not insert document");
+
+    //     Ok(())
+    // }
+
     pub async fn insert_document(
         &self,
         collection_name: &str,
         document: bson::Document,
+        retries: u32,
     ) -> Result<(), mongodb::error::Error> {
         let db = self.client.database(&self.db_name);
         let collection = db.collection::<bson::Document>(collection_name);
 
-        collection
-            .insert_one(document, None)
-            .await
-            .expect("Could not insert document");
-
-        Ok(())
+        for attempt in 0..=retries {
+            match collection.insert_one(document.clone(), None).await {
+                Ok(_) => return Ok(()),
+                Err(e) => {
+                    println!(
+                        "Attempt {}/{} failed with error: {}. Retrying...",
+                        attempt + 1,
+                        retries,
+                        e,
+                    );
+                    tokio::time::sleep(Duration::from_secs(2u64.pow(attempt))).await;
+                }
+            }
+        }
+        Err(mongodb::error::Error::from(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Failed to insert document after all retries",
+        )))
     }
 
     // This method will update the user balance document in MongoDB
@@ -162,19 +192,6 @@ impl MongoClient {
         let result = collection.find_one(filter, None).await?;
 
         Ok(result)
-    }
-
-    pub async fn insert_new_document(
-        &self,
-        collection_name: &str,
-        document: Document,
-    ) -> Result<(), mongodb::error::Error> {
-        let db = self.client.database(&self.db_name);
-        let collection = db.collection::<bson::Document>(collection_name);
-
-        collection.insert_one(document.clone(), None).await?;
-
-        Ok(())
     }
 
     pub async fn get_document_by_field(
@@ -300,9 +317,10 @@ impl MongoClient {
         );
 
         // Insert the new document into the MongoDB collection
-        self.insert_new_document(
+        self.insert_document(
             consts::COLLECTION_USER_BALANCE_ENTRY,
             user_balance_entry.to_document(),
+            consts::MONGO_RETRIES,
         )
         .await?;
 
@@ -366,9 +384,10 @@ impl MongoClient {
                 user_balance.available_balance = amount;
 
                 // Insert the new document into the MongoDB collection
-                self.insert_new_document(
+                self.insert_document(
                     consts::COLLECTION_USER_BALANCES,
                     user_balance.to_document(),
+                    consts::MONGO_RETRIES,
                 )
                 .await?;
             }
@@ -621,6 +640,31 @@ impl MongoClient {
             Ok(value) => Ok(value.to_string()),
             Err(e) => Err(e),
         }
+    }
+
+    pub async fn load_active_transfers_with_retry(
+        &self,
+        retries: u32,
+    ) -> Result<Option<HashMap<(String, i64), Brc20ActiveTransfer>>, String> {
+        for attempt in 0..=retries {
+            match self.load_active_transfers().await {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    // Error handling and backoff logic here
+                    log::warn!(
+                        "Attempt {}/{} failed with error: {}. Retrying...",
+                        attempt + 1,
+                        retries,
+                        e,
+                    );
+                    tokio::time::sleep(Duration::from_secs(2u64.pow(attempt))).await;
+                }
+            }
+        }
+        Err(format!(
+            "Failed to load active transfers after {} attempts",
+            retries
+        ))
     }
 
     pub async fn load_active_transfers(

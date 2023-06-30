@@ -139,7 +139,11 @@ impl Brc20Mint {
             );
 
             mongo_client
-                .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
+                .insert_document(
+                    consts::COLLECTION_INVALIDS,
+                    invalid_tx.to_document(),
+                    consts::MONGO_RETRIES,
+                )
                 .await?;
         }
 
@@ -162,7 +166,11 @@ pub async fn validate_and_insert_mint(
     if validated_mint_tx.is_valid() {
         // Add the mint transaction to the mongo database
         mongo_client
-            .insert_document(consts::COLLECTION_MINTS, validated_mint_tx.to_document())
+            .insert_document(
+                consts::COLLECTION_MINTS,
+                validated_mint_tx.to_document(),
+                consts::MONGO_RETRIES,
+            )
             .await?;
     }
 

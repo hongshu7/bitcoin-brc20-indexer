@@ -44,7 +44,6 @@ impl Brc20Deploy {
         }
     }
 
-    // getters and setters
     pub fn get_max_supply(&self) -> f64 {
         self.max
     }
@@ -129,7 +128,11 @@ impl Brc20Deploy {
 
             // insert invalid deploy tx into mongodb
             mongo_client
-                .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
+                .insert_document(
+                    consts::COLLECTION_INVALIDS,
+                    invalid_tx.to_document(),
+                    consts::MONGO_RETRIES,
+                )
                 .await?;
         }
 
@@ -250,7 +253,11 @@ pub async fn handle_deploy_operation(
 
         // Insert ticker into MongoDB
         mongo_client
-            .insert_document(consts::COLLECTION_TICKERS, ticker.to_document())
+            .insert_document(
+                consts::COLLECTION_TICKERS,
+                ticker.to_document(),
+                consts::MONGO_RETRIES,
+            )
             .await?;
 
         // Insert the valid deploy transaction into MongoDB
@@ -258,6 +265,7 @@ pub async fn handle_deploy_operation(
             .insert_document(
                 consts::COLLECTION_DEPLOYS,
                 validated_deploy_tx.to_document(),
+                consts::MONGO_RETRIES,
             )
             .await?;
 

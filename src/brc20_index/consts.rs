@@ -7,6 +7,7 @@ pub const COLLECTION_USER_BALANCES: &str = "brc20_user_balances";
 pub const COLLECTION_USER_BALANCE_ENTRY: &str = "brc20_user_balance_entry";
 pub const COLLECTION_BLOCKS_COMPLETED: &str = "blocks_completed";
 pub const COLLECTION_BRC20_ACTIVE_TRANSFERS: &str = "brc20_active_transfers";
+pub const MONGO_RETRIES: u32 = 3;
 
 pub const BRC20_STARTING_BLOCK_HEIGHT: i64 = 779832;
 
