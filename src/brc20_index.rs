@@ -193,9 +193,8 @@ pub async fn index_brc20(
                             .drop_collection(consts::COLLECTION_BRC20_ACTIVE_TRANSFERS)
                             .await?;
 
-                        // store active transfer collection
+                        // store active transfer collection, if any
                         if let Some(active_transfers) = active_transfers_opt {
-                            // if there are any active transfers, store them
                             if !active_transfers.is_empty() {
                                 mongo_client
                                     .insert_active_transfers_to_mongodb(active_transfers)
@@ -295,10 +294,9 @@ pub async fn check_for_transfer_send(
             let input_value_sum: u64 = input_values.iter().sum();
 
             // Calculate the index of the output (vout) which is the recipient of the
-            // current input by finding the first output whose value is greater than
+            // inscribed satoshi by finding the first output whose value is greater than
             // or equal to the sum of all preceding input values. This is based on the
-            // assumption that inputs and outputs are processed in order and each input's
-            // value goes to the next output that it fully covers.
+            // assumption that inputs' and outputs' satoshisare processed in order
             transaction
                 .output
                 .iter()

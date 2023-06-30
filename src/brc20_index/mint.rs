@@ -12,7 +12,6 @@ use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Brc20Mint {
-    // pub id: Option<bson::oid>,
     pub amt: f64,
     pub block_height: u32,
     pub tx_height: u32,

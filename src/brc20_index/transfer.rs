@@ -65,7 +65,6 @@ impl Brc20Transfer {
         }
     }
 
-    // getters and setters
     pub fn get_transfer_script(&self) -> &Brc20Inscription {
         &self.inscription
     }
@@ -126,8 +125,6 @@ impl Brc20Transfer {
             // check if user has enough balance to transfer
             if available_balance >= transfer_amount {
                 println!("VALID: Transfer inscription added. From: {:#?}", from);
-
-                // if valid, add transfer inscription to user balance
                 self.is_valid = true;
 
                 // insert user balance entry
@@ -222,14 +219,11 @@ pub async fn handle_transfer_operation(
         .validate_inscribe_transfer(mongo_client, active_transfers)
         .await?;
 
-    let from_address = validated_transfer_tx.from.clone();
-
     if validated_transfer_tx.is_valid() {
         info!(
             "Transfer: {:?}",
             validated_transfer_tx.get_transfer_script()
         );
-        info!("From Address: {:?}", &from_address);
 
         // Add the valid transfer to the mongo database
         mongo_client

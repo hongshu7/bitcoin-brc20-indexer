@@ -102,7 +102,7 @@ impl From<&str> for UserBalanceEntryType {
             "inscription" => UserBalanceEntryType::Inscription,
             "send" => UserBalanceEntryType::Send,
             "receive" => UserBalanceEntryType::Receive,
-            _ => panic!("Invalid UserBalanceEntryType"), // Decide how to handle invalid input
+            _ => panic!("Invalid UserBalanceEntryType"),
         }
     }
 }
