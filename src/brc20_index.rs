@@ -246,11 +246,6 @@ pub async fn index_brc20(
                         // If active_transfers_opt is None, initialize it with a new HashMap
                         if active_transfers_opt.is_none() {
                             active_transfers_opt = Some(HashMap::new());
-                        } else {
-                            // drop active transfer collection
-                            mongo_client
-                                .drop_collection(consts::COLLECTION_BRC20_ACTIVE_TRANSFERS)
-                                .await?;
                         }
 
                         let mut tx_height = 0u32;
@@ -392,6 +387,11 @@ pub async fn index_brc20(
                             // Increment the tx height
                             tx_height += 1;
                         }
+
+                        // drop mongodb collection right before inserting active transfers
+                        mongo_client
+                            .drop_collection(consts::COLLECTION_BRC20_ACTIVE_TRANSFERS)
+                            .await?;
 
                         // store active transfer collection
                         if let Some(active_transfers) = active_transfers_opt {
