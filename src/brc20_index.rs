@@ -96,8 +96,8 @@ pub async fn index_brc20(
                                             match handle_deploy_operation(
                                                 mongo_client,
                                                 inscription,
-                                                raw_tx.clone(),
-                                                owner.clone(),
+                                                &raw_tx,
+                                                owner,
                                                 current_block_height,
                                                 tx_height,
                                             )
@@ -138,8 +138,8 @@ pub async fn index_brc20(
                                                 current_block_height,
                                                 tx_height,
                                                 inscription,
-                                                raw_tx.clone(),
-                                                owner.clone(),
+                                                &raw_tx,
+                                                owner,
                                                 &mut active_transfers_opt,
                                             )
                                             .await

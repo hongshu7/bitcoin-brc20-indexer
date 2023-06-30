@@ -24,7 +24,7 @@ pub struct Brc20Deploy {
 
 impl Brc20Deploy {
     pub fn new(
-        tx: GetRawTransactionResult,
+        tx: &GetRawTransactionResult,
         inscription: Brc20Inscription,
         block_height: u32,
         tx_height: u32,
@@ -38,7 +38,7 @@ impl Brc20Deploy {
             block_height,
             tx_height,
             owner,
-            tx,
+            tx: tx.clone(),
             inscription,
             is_valid: false,
         }
@@ -228,7 +228,7 @@ impl ToDocument for Brc20Deploy {
 pub async fn handle_deploy_operation(
     mongo_client: &MongoClient,
     inscription: Brc20Inscription,
-    raw_tx: GetRawTransactionResult,
+    raw_tx: &GetRawTransactionResult,
     owner: Address,
     block_height: u32,
     tx_height: u32,

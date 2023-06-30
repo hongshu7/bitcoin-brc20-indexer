@@ -40,7 +40,7 @@ pub struct Brc20Transfer {
 
 impl Brc20Transfer {
     pub fn new(
-        inscription_tx: GetRawTransactionResult,
+        inscription_tx: &GetRawTransactionResult,
         inscription: Brc20Inscription,
         block_height: u32,
         tx_height: u32,
@@ -56,7 +56,7 @@ impl Brc20Transfer {
             amt,
             block_height,
             tx_height,
-            tx: inscription_tx,
+            tx: inscription_tx.clone(),
             send_tx: None,
             inscription,
             from,
@@ -209,7 +209,7 @@ pub async fn handle_transfer_operation(
     block_height: u32,
     tx_height: u32,
     inscription: Brc20Inscription,
-    raw_tx: GetRawTransactionResult,
+    raw_tx: &GetRawTransactionResult,
     sender: Address,
     active_transfers: &mut Option<HashMap<(String, i64), Brc20ActiveTransfer>>,
 ) -> Result<bool, Box<dyn std::error::Error>> {
