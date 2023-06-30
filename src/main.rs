@@ -142,20 +142,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // reset total_minted for each ticker
         // Reset all tickers total_minted to 0.0
+        info!("Resetting total_minted for all tickers...");
         match mongo_client.reset_tickers_total_minted().await {
-            Ok(_) => info!("Reset total_minted for all tickers"),
+            Ok(_) => info!("Reset complete."),
             Err(e) => info!("Error resetting total_minted for all tickers: {:?}", e),
         };
 
         //recalculate total_minted for each ticker
+        info!("Recalculating total_minted for all tickers...");
         match mongo_client.calculate_and_update_total_minted().await {
-            Ok(_) => info!("Recalculated total_minted for all tickers"),
+            Ok(_) => info!("Recalculation complete."),
             Err(e) => info!("Error recalculating total_minted for all tickers: {:?}", e),
         };
 
         // rebuild userbalances
+        info!("Recreating userbalances...");
         match mongo_client.rebuild_user_balances().await {
-            Ok(_) => info!("Recreated userbalances"),
+            Ok(_) => info!("Recreation complete."),
             Err(e) => info!("Error recreating userbalances: {:?}", e),
         };
     }

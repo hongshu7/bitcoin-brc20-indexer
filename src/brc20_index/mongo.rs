@@ -59,7 +59,7 @@ impl MongoClient {
                         retries,
                         e,
                     );
-                    tokio::time::sleep(Duration::from_secs(2u64.pow(attempt))).await;
+                    tokio::time::sleep(Duration::from_secs(2)).await;
                 }
             }
         }
@@ -92,7 +92,7 @@ impl MongoClient {
                         retries,
                         e,
                     );
-                    tokio::time::sleep(Duration::from_secs(2u64.pow(attempt))).await;
+                    tokio::time::sleep(Duration::from_secs(2)).await;
                 }
             }
         }
@@ -121,7 +121,7 @@ impl MongoClient {
                         retries,
                         e,
                     );
-                    tokio::time::sleep(Duration::from_secs(2u64.pow(attempt))).await;
+                    tokio::time::sleep(Duration::from_secs(2)).await;
                 }
             }
         }
@@ -149,7 +149,7 @@ impl MongoClient {
                         retries + 1
                     );
                     attempts += 1;
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 }
             }
         }
@@ -182,7 +182,7 @@ impl MongoClient {
                         retries + 1
                     );
                     attempts += 1;
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 }
             }
         }
@@ -211,7 +211,7 @@ impl MongoClient {
                         retries + 1
                     );
                     attempts += 1;
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 }
             }
         }
@@ -715,7 +715,7 @@ impl MongoClient {
                         retries,
                         e,
                     );
-                    tokio::time::sleep(Duration::from_secs(2u64.pow(attempt))).await;
+                    tokio::time::sleep(Duration::from_secs(2)).await;
                 }
             }
         }
