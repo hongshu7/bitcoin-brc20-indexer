@@ -360,31 +360,35 @@ pub async fn index_brc20(
                                         }
                                     }
                                 } else {
-                                    if active_transfers_opt.is_none() {
-                                        active_transfers_opt = Some(HashMap::new());
-                                    }
-
-                                    if let Some(ref mut active_transfers) =
-                                        &mut active_transfers_opt
-                                    {
-                                        match brc20_index
-                                            .check_for_transfer_send(
-                                                mongo_client,
-                                                &rpc,
-                                                &raw_tx,
-                                                current_block_height.into(),
-                                                active_transfers,
-                                            )
-                                            .await
-                                        {
-                                            Ok(_) => (),
-                                            Err(e) => {
-                                                error!("Error checking for transfer send: {:?}", e);
-                                            }
-                                        };
-                                    }
+                                    error!("Failed to extract and process witness data. Could be a non SegWit transaction.");
                                 }
                             }
+
+                            println!("inscription_found: {:?}", inscription_found);
+                            // if no inscription found, check for transfer send
+                            if !inscription_found {
+                                if active_transfers_opt.is_none() {
+                                    active_transfers_opt = Some(HashMap::new());
+                                }
+                                if let Some(ref mut active_transfers) = &mut active_transfers_opt {
+                                    match brc20_index
+                                        .check_for_transfer_send(
+                                            mongo_client,
+                                            &rpc,
+                                            &raw_tx,
+                                            current_block_height.into(),
+                                            active_transfers,
+                                        )
+                                        .await
+                                    {
+                                        Ok(_) => (),
+                                        Err(e) => {
+                                            error!("Error checking for transfer send: {:?}", e);
+                                        }
+                                    };
+                                }
+                            }
+
                             // Increment the tx height
                             tx_height += 1;
                         }
