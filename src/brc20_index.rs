@@ -274,6 +274,7 @@ pub async fn index_brc20(
                                 }
                             };
 
+                            let mut inscription_found = false;
                             for witness in witness_data {
                                 if let Some(inscription) = extract_and_process_witness_data(witness)
                                 {
@@ -303,7 +304,7 @@ pub async fn index_brc20(
                                             )
                                             .await
                                             {
-                                                Ok(_) => (),
+                                                Ok(found) => inscription_found = found,
                                                 Err(e) => {
                                                     error!(
                                                         "Error handling deploy operation: {:?}",
@@ -323,7 +324,7 @@ pub async fn index_brc20(
                                             )
                                             .await
                                             {
-                                                Ok(_) => (),
+                                                Ok(found) => inscription_found = found,
                                                 Err(e) => {
                                                     error!(
                                                         "Error handling mint operation: {:?}",
@@ -344,7 +345,7 @@ pub async fn index_brc20(
                                             )
                                             .await
                                             {
-                                                Ok(_) => (),
+                                                Ok(found) => inscription_found = found,
                                                 Err(e) => {
                                                     error!(
                                                         "Error handling transfer inscription: {:?}",

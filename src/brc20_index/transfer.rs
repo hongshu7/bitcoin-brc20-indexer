@@ -227,7 +227,7 @@ pub async fn handle_transfer_operation(
     raw_tx: GetRawTransactionResult,
     sender: Address,
     active_transfers: &mut Option<HashMap<(String, i64), Brc20ActiveTransfer>>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<bool, Box<dyn std::error::Error>> {
     // Create a new transfer transaction
     let mut validated_transfer_tx =
         Brc20Transfer::new(raw_tx, inscription, block_height, tx_height, sender);
@@ -253,9 +253,11 @@ pub async fn handle_transfer_operation(
                 validated_transfer_tx.to_document(),
             )
             .await?;
-    }
 
-    Ok(())
+        return Ok(true);
+    } else {
+        return Ok(false);
+    }
 }
 
 impl ToDocument for Brc20Transfer {

@@ -215,7 +215,7 @@ pub async fn handle_mint_operation(
     owner: Address,
     inscription: Brc20Inscription,
     raw_tx: &GetRawTransactionResult,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<bool, Box<dyn std::error::Error>> {
     let validated_mint_tx = validate_and_insert_mint(
         mongo_client,
         block_height,
@@ -235,9 +235,11 @@ pub async fn handle_mint_operation(
         info!("TO Address: {:?}", validated_mint_tx.to);
 
         update_balances_and_ticker(mongo_client, &validated_mint_tx).await?;
-    }
 
-    Ok(())
+        return Ok(true);
+    } else {
+        return Ok(false);
+    }
 }
 
 impl fmt::Display for Brc20Mint {
