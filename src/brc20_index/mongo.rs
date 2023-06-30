@@ -10,7 +10,7 @@ use crate::brc20_index::user_balance::UserBalance;
 use futures_util::stream::TryStreamExt;
 use futures_util::StreamExt;
 use mongodb::bson::{doc, Bson, DateTime, Document};
-use mongodb::options::UpdateOptions;
+use mongodb::options::{FindOneOptions, UpdateOptions};
 use mongodb::{bson, options::ClientOptions, Client};
 
 pub struct MongoClient {
@@ -105,13 +105,14 @@ impl MongoClient {
         &self,
         collection_name: &str,
         filter: Document,
+        options: Option<FindOneOptions>,
     ) -> anyhow::Result<Option<Document>> {
         let db = self.client.database(&self.db_name);
         let collection = db.collection::<bson::Document>(collection_name);
         let retries = consts::MONGO_RETRIES;
 
         for attempt in 0..=retries {
-            match collection.find_one(filter.clone(), None).await {
+            match collection.find_one(filter.clone(), options.clone()).await {
                 Ok(result) => return Ok(result),
                 Err(e) => {
                     println!(
@@ -224,7 +225,8 @@ impl MongoClient {
         field_value: &str,
     ) -> Result<Option<Document>, anyhow::Error> {
         let filter = doc! { field_name: field_value };
-        self.find_one_with_retries(collection_name, filter).await
+        self.find_one_with_retries(collection_name, filter, None)
+            .await
     }
 
     pub async fn get_document_by_filter(
@@ -232,7 +234,8 @@ impl MongoClient {
         collection_name: &str,
         filter: Document,
     ) -> Result<Option<Document>, anyhow::Error> {
-        self.find_one_with_retries(collection_name, filter).await
+        self.find_one_with_retries(collection_name, filter, None)
+            .await
     }
 
     pub async fn update_document_by_field(
@@ -452,7 +455,7 @@ impl MongoClient {
         // Retrieve the brc20ticker document
         let filter = doc! { "tick": ticker };
         let ticker_doc = self
-            .find_one_with_retries(consts::COLLECTION_TICKERS, filter.clone())
+            .find_one_with_retries(consts::COLLECTION_TICKERS, filter.clone(), None)
             .await?;
 
         match ticker_doc {
@@ -495,19 +498,16 @@ impl MongoClient {
     }
 
     pub async fn get_last_completed_block_height(&self) -> Result<Option<i64>, anyhow::Error> {
-        let db = self.client.database(&self.db_name);
-        let collection = db.collection::<bson::Document>(consts::COLLECTION_BLOCKS_COMPLETED);
-
         // Sort in descending order to get the latest block height
         let sort_doc = doc! { consts::KEY_BLOCK_HEIGHT: -1 };
+        let find_options = FindOneOptions::builder().sort(sort_doc).build();
 
         // Find one document (the latest) with the sorted criteria
-        if let Some(result) = collection
-            .find_one(
-                None,
-                mongodb::options::FindOneOptions::builder()
-                    .sort(sort_doc)
-                    .build(),
+        if let Some(result) = self
+            .find_one_with_retries(
+                consts::COLLECTION_BLOCKS_COMPLETED,
+                doc! {}, // No filter, we want any document
+                Some(find_options),
             )
             .await?
         {
@@ -661,7 +661,7 @@ impl MongoClient {
         collection: &str,
         filter: Document,
     ) -> Result<bool, anyhow::Error> {
-        match self.find_one_with_retries(collection, filter).await {
+        match self.find_one_with_retries(collection, filter, None).await {
             Ok(Some(_)) => Ok(true),
             Ok(None) => Ok(false),
             Err(e) => Err(e),
