@@ -9,7 +9,6 @@ use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use log::{error, info};
 use mongodb::bson::{doc, Bson, DateTime, Document};
 use serde::Serialize;
-use std::fmt;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Brc20Mint {
@@ -239,15 +238,5 @@ pub async fn handle_mint_operation(
         return Ok(true);
     } else {
         return Ok(false);
-    }
-}
-
-impl fmt::Display for Brc20Mint {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Brc20 TransactionId: {}", self.tx.txid)?;
-        writeln!(f, "Mint: {:#?}", self.inscription)?;
-        writeln!(f, "Amount: {}", self.amt)?;
-        writeln!(f, "Is Valid: {}", self.is_valid)?;
-        Ok(())
     }
 }

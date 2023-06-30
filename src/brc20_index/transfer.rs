@@ -5,7 +5,7 @@ use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use log::{error, info};
 use mongodb::bson::{doc, Bson, DateTime, Document};
 use serde::Serialize;
-use std::{collections::HashMap, fmt};
+use std::collections::HashMap;
 
 // create active transfer struct
 #[derive(Debug, Serialize)]
@@ -200,21 +200,6 @@ impl Brc20Transfer {
             .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
             .await?;
 
-        Ok(())
-    }
-}
-
-impl fmt::Display for Brc20Transfer {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Inscription TransactionId: {}", self.tx.txid)?;
-        writeln!(f, "Transfer Transaction: {:?}", self.send_tx)?;
-        writeln!(f, "Transfer Script: {:#?}", self.inscription)?;
-        writeln!(f, "Block Height: {}", self.block_height)?;
-        writeln!(f, "Transaction Height: {}", self.tx_height)?;
-        writeln!(f, "From: {:?}", self.from)?;
-        writeln!(f, "Amount: {}", self.amt)?;
-        writeln!(f, "Receiver: {:?}", self.to)?;
-        writeln!(f, "Is Valid: {}", self.is_valid)?;
         Ok(())
     }
 }

@@ -8,7 +8,6 @@ use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use log::{error, info};
 use mongodb::bson::{doc, Bson, DateTime, Document};
 use serde::Serialize;
-use std::fmt;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Brc20Deploy {
@@ -69,10 +68,6 @@ impl Brc20Deploy {
 
     pub fn get_deploy_script(&self) -> &Brc20Inscription {
         &self.inscription
-    }
-
-    pub fn get_raw_tx(&self) -> &GetRawTransactionResult {
-        &self.tx
     }
 
     pub async fn validate_deploy_script(
@@ -283,21 +278,5 @@ fn decimal_places(num: f64) -> u32 {
         s[pos + 1..].len() as u32
     } else {
         0
-    }
-}
-
-impl fmt::Display for Brc20Deploy {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Deploy TransactionId:")?;
-        writeln!(f, "{}", self.get_raw_tx().txid)?;
-        writeln!(f, "Deploy Script: {:#?}", self.inscription)?;
-        writeln!(f, "Is Valid: {}", self.is_valid)?;
-
-        // Additional information based on the fields of Brc20DeployTx
-        writeln!(f, "Max Supply: {}", self.max)?;
-        writeln!(f, "Limit: {}", self.lim)?;
-        writeln!(f, "Decimals: {}", self.dec)?;
-
-        Ok(())
     }
 }

@@ -1,14 +1,13 @@
 use self::{
     brc20_ticker::Brc20Ticker,
     deploy::handle_deploy_operation,
-    invalid_brc20::InvalidBrc20TxMap,
     mint::handle_mint_operation,
     mongo::MongoClient,
     transfer::{handle_transfer_operation, Brc20ActiveTransfer},
     user_balance::UserBalanceEntryType,
     utils::{extract_and_process_witness_data, get_owner_of_vout, get_witness_data_from_raw_tx},
 };
-use bitcoin::{Address, OutPoint};
+use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::{
     GetRawTransactionResult, GetRawTransactionResultVin, GetRawTransactionResultVout,
     GetRawTransactionResultVoutScriptPubKey,
@@ -75,18 +74,12 @@ impl std::fmt::Display for Brc20Inscription {
 pub struct Brc20Index {
     // The BRC-20 tickers.
     pub tickers: HashMap<String, Brc20Ticker>,
-    // The invalid BRC-20 transactions.
-    pub invalid_tx_map: InvalidBrc20TxMap,
-    // The active BRC-20 transfer inscriptions.
-    pub active_transfer_inscriptions: HashMap<OutPoint, String>,
 }
 
 impl Brc20Index {
     pub fn new() -> Self {
         Brc20Index {
             tickers: HashMap::new(),
-            invalid_tx_map: InvalidBrc20TxMap::new(),
-            active_transfer_inscriptions: HashMap::new(),
         }
     }
 
@@ -273,7 +266,7 @@ pub async fn index_brc20(
                             for witness in witness_data {
                                 if let Some(inscription) = extract_and_process_witness_data(witness)
                                 {
-                                    // print pretty json
+                                    // log raw brc20 data
                                     let pretty_json =
                                         serde_json::to_string(&inscription).unwrap_or_default();
                                     info!("Raw Brc-20 data: {}", pretty_json);
@@ -354,12 +347,9 @@ pub async fn index_brc20(
                                             error!("Unexpected operation: {}", inscription.op);
                                         }
                                     }
-                                } else {
-                                    error!("Failed to extract and process witness data. Could be a non SegWit transaction.");
                                 }
                             }
 
-                            println!("inscription_found: {:?}", inscription_found);
                             // if no inscription found, check for transfer send
                             if !inscription_found {
                                 if active_transfers_opt.is_none() {
@@ -428,8 +418,7 @@ pub async fn index_brc20(
             Err(e) => {
                 error!("Failed to fetch block hash for height: {:?}", e);
                 sleep(Duration::from_secs(60));
-            } //
-              // TODO: save to MongoDB this block height and timestamp
+            }
         }
     }
 }

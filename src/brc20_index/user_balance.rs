@@ -1,8 +1,7 @@
-use super::{mint::Brc20Mint, transfer::Brc20Transfer, ToDocument};
-use bitcoin::OutPoint;
+use super::ToDocument;
 use mongodb::bson::{doc, Bson, DateTime, Document};
 use serde::Serialize;
-use std::{collections::HashMap, fmt};
+use std::fmt;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UserBalance {
@@ -11,10 +10,6 @@ pub struct UserBalance {
     pub overall_balance: f64,
     pub available_balance: f64,
     pub transferable_balance: f64,
-    active_transfer_inscriptions: HashMap<OutPoint, Brc20Transfer>,
-    transfer_sends: Vec<Brc20Transfer>,
-    transfer_receives: Vec<Brc20Transfer>,
-    mints: Vec<Brc20Mint>,
 }
 
 impl ToDocument for UserBalance {
@@ -38,10 +33,6 @@ impl UserBalance {
             overall_balance: 0.0,
             available_balance: 0.0,
             transferable_balance: 0.0,
-            active_transfer_inscriptions: HashMap::new(),
-            transfer_sends: Vec::new(),
-            transfer_receives: Vec::new(),
-            mints: Vec::new(),
         }
     }
 }
