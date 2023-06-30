@@ -106,7 +106,7 @@ impl Brc20Transfer {
         };
 
         let user_balance_from = mongo_client
-            .get_user_balance_document(consts::COLLECTION_USER_BALANCES, filter.clone())
+            .get_document_by_filter(consts::COLLECTION_USER_BALANCES, filter.clone())
             .await?;
 
         if let Some(user_balance) = user_balance_from {
@@ -194,11 +194,7 @@ impl Brc20Transfer {
 
         // Insert the invalid transaction into MongoDB
         mongo_client
-            .insert_document(
-                consts::COLLECTION_INVALIDS,
-                invalid_tx.to_document(),
-                consts::MONGO_RETRIES,
-            )
+            .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
             .await?;
 
         Ok(())
@@ -234,7 +230,6 @@ pub async fn handle_transfer_operation(
             .insert_document(
                 consts::COLLECTION_TRANSFERS,
                 validated_transfer_tx.to_document(),
-                consts::MONGO_RETRIES,
             )
             .await?;
 
