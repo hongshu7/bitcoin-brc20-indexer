@@ -127,6 +127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             consts::COLLECTION_TICKERS,
             consts::COLLECTION_USER_BALANCE_ENTRY,
             consts::COLLECTION_BRC20_ACTIVE_TRANSFERS,
+            consts::COLLECTION_TOTAL_MINTED_AT_BLOCK_HEIGHT,
         ];
 
         for collection in collections {
@@ -140,17 +141,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .drop_collection(consts::COLLECTION_USER_BALANCES)
             .await?;
 
-        // reset total_minted for each ticker
-        // Reset all tickers total_minted to 0.0
-        info!("Resetting total_minted for all tickers...");
-        match mongo_client.reset_tickers_total_minted().await {
-            Ok(_) => info!("Reset complete."),
-            Err(e) => info!("Error resetting total_minted for all tickers: {:?}", e),
-        };
-
         //recalculate total_minted for each ticker
         info!("Recalculating total_minted for all tickers...");
-        match mongo_client.calculate_and_update_total_minted().await {
+        match mongo_client.update_ticker_totals(start_block_height).await {
             Ok(_) => info!("Recalculation complete."),
             Err(e) => info!("Error recalculating total_minted for all tickers: {:?}", e),
         };

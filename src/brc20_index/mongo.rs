@@ -10,7 +10,8 @@ use crate::brc20_index::user_balance::UserBalance;
 use futures_util::stream::TryStreamExt;
 use futures_util::StreamExt;
 use mongodb::bson::{doc, Bson, DateTime, Document};
-use mongodb::options::{FindOneOptions, UpdateOptions};
+use mongodb::options::{FindOneOptions, FindOptions, UpdateOptions};
+use mongodb::Cursor;
 use mongodb::{bson, options::ClientOptions, Client};
 
 pub struct MongoClient {
@@ -128,6 +129,35 @@ impl MongoClient {
         Err(anyhow::anyhow!("Failed to find document after all retries"))
     }
 
+    pub async fn find_with_retries(
+        &self,
+        collection_name: &str,
+        filter: Option<Document>,
+        options: Option<FindOptions>,
+    ) -> anyhow::Result<Cursor<Document>> {
+        let db = self.client.database(&self.db_name);
+        let collection = db.collection::<bson::Document>(collection_name);
+        let retries = consts::MONGO_RETRIES;
+
+        for attempt in 0..=retries {
+            match collection.find(filter.clone(), options.clone()).await {
+                Ok(cursor) => return Ok(cursor),
+                Err(e) => {
+                    println!(
+                        "Attempt {}/{} failed with error: {}. Retrying...",
+                        attempt + 1,
+                        retries,
+                        e,
+                    );
+                    tokio::time::sleep(Duration::from_secs(2u64.pow(attempt))).await;
+                }
+            }
+        }
+        Err(anyhow::anyhow!(
+            "Failed to find documents after all retries"
+        ))
+    }
+
     pub async fn insert_many_with_retries(
         &self,
         collection_name: &str,
@@ -153,40 +183,6 @@ impl MongoClient {
                 }
             }
         }
-        Err(anyhow::Error::msg("All retry attempts failed"))
-    }
-
-    pub async fn update_many_with_retries(
-        &self,
-        collection_name: &str,
-        filter: Document,
-        update: Document,
-    ) -> Result<(), anyhow::Error> {
-        let db = self.client.database(&self.db_name);
-        let collection = db.collection::<bson::Document>(collection_name);
-        let update_options = UpdateOptions::builder().upsert(false).build();
-        let retries = consts::MONGO_RETRIES;
-
-        let mut attempts = 0;
-        while attempts <= retries {
-            match collection
-                .update_many(filter.clone(), update.clone(), update_options.clone())
-                .await
-            {
-                Ok(_) => return Ok(()),
-                Err(e) => {
-                    println!(
-                        "Failed to update many documents: {}. Attempt {}/{}",
-                        e,
-                        attempts + 1,
-                        retries + 1
-                    );
-                    attempts += 1;
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                }
-            }
-        }
-
         Err(anyhow::Error::msg("All retry attempts failed"))
     }
 
@@ -541,54 +537,6 @@ impl MongoClient {
         Ok(())
     }
 
-    pub async fn reset_tickers_total_minted(&self) -> anyhow::Result<()> {
-        let filter = doc! {}; // matches all documents
-        let update = doc! { "$set": { "total_minted": 0.0 } };
-
-        // Apply the update to all documents
-        self.update_many_with_retries(consts::COLLECTION_TICKERS, filter, update)
-            .await?;
-
-        Ok(())
-    }
-
-    pub async fn calculate_and_update_total_minted(&self) -> anyhow::Result<()> {
-        let db = self.client.database(&self.db_name);
-        // Get a handle to the brc20_tickers collection
-        let tickers_coll = db.collection::<bson::Document>(consts::COLLECTION_TICKERS);
-
-        // Get a handle to the brc20_mints collection
-        let mints_coll = db.collection::<bson::Document>(consts::COLLECTION_MINTS);
-
-        // Get all tickers
-        let cursor = tickers_coll.find(None, None).await?;
-        let tickers: Vec<Document> = cursor.try_collect().await?;
-
-        for ticker in tickers {
-            // Extract ticker from the document
-            let tick = ticker.get_str("tick")?;
-
-            // Query all mints associated with this ticker
-            let filter = doc! { "inscription.tick": ticker.get_str("tick")? };
-            let cursor = mints_coll.find(filter, None).await?;
-            let mints: Vec<Document> = cursor.try_collect().await?;
-
-            // Sum the amounts
-            let total_minted: f64 = mints
-                .iter()
-                .filter_map(|mint| mint.get_f64("amt").ok())
-                .sum();
-
-            // Update "total_minted" for this ticker in the database
-            let filter = doc! { "tick": tick };
-            let update = doc! { "$set": { "total_minted": total_minted } };
-            self.update_one_with_retries(consts::COLLECTION_TICKERS, filter, update)
-                .await?;
-        }
-
-        Ok(())
-    }
-
     pub async fn rebuild_user_balances(&self) -> anyhow::Result<()> {
         let db = self.client.database(&self.db_name);
 
@@ -776,6 +724,99 @@ impl MongoClient {
         // Insert the documents into the collection with retries.
         self.insert_many_with_retries(consts::COLLECTION_BRC20_ACTIVE_TRANSFERS, documents?)
             .await?;
+
+        Ok(())
+    }
+
+    pub async fn insert_tickers_total_minted_at_block_height(
+        &self,
+        block_height: i64,
+    ) -> anyhow::Result<()> {
+        // Get all tickers
+        let cursor = self
+            .find_with_retries(consts::COLLECTION_TICKERS, None, None)
+            .await?;
+        let tickers: Vec<Document> = cursor.try_collect().await?;
+
+        // Prepare the tickers array for the new document
+        let mut ticker_docs = Vec::new();
+        for ticker in tickers {
+            // Get the total minted for this ticker
+            let total_minted = ticker.get_f64("total_minted").unwrap_or(0.0);
+
+            // Build a subdocument for this ticker
+            let ticker_doc = doc! {
+                "tick": ticker.get_str("tick")?,
+                "total_minted": total_minted,
+            };
+            ticker_docs.push(ticker_doc);
+        }
+
+        // Build the new document
+        let new_ticker_total_minted_at_block_height = doc! {
+            "block_height": block_height,
+            "created_at": Bson::DateTime(DateTime::now()),
+            "tickers": ticker_docs,
+        };
+
+        // Insert the new document into the blocks_completed collection
+        // blocks_coll.insert_one(new_block_summary, None).await?;
+        self.insert_document(
+            consts::COLLECTION_TOTAL_MINTED_AT_BLOCK_HEIGHT,
+            new_ticker_total_minted_at_block_height,
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    // Function to get ticker totals by block height
+    pub async fn get_ticker_totals_by_block_height(
+        &self,
+        block_height: i64,
+    ) -> Result<Option<Document>, anyhow::Error> {
+        let db = self.client.database(&self.db_name);
+        let collection =
+            db.collection::<bson::Document>(consts::COLLECTION_TOTAL_MINTED_AT_BLOCK_HEIGHT);
+
+        let filter = doc! { "block_height": block_height };
+
+        let result = self
+            .find_one_with_retries(collection.name(), filter, None)
+            .await?;
+
+        Ok(result)
+    }
+
+    // Function to update ticker totals
+    pub async fn update_ticker_totals(&self, block_height: i64) -> Result<(), anyhow::Error> {
+        // First, get the document for the given block height
+        let ticker_totals_doc = match self.get_ticker_totals_by_block_height(block_height).await? {
+            Some(doc) => doc,
+            None => {
+                return Err(anyhow::Error::msg(format!(
+                    "No document found for block height {}",
+                    block_height
+                )))
+            }
+        };
+
+        // Get the tickers array from the ticker totals document
+        let ticker_totals = ticker_totals_doc.get_array("tickers")?;
+
+        for ticker_doc in ticker_totals {
+            if let Bson::Document(ticker_doc) = ticker_doc {
+                let tick = ticker_doc.get_str("tick")?;
+                let total_minted = ticker_doc.get_f64("total_minted")?;
+
+                // Update the total_minted field for this ticker in the tickers collection
+                let filter = doc! { "tick": tick };
+                let update = doc! { "$set": { "total_minted": total_minted } };
+
+                self.update_one_with_retries(consts::COLLECTION_TICKERS, filter, update)
+                    .await?;
+            }
+        }
 
         Ok(())
     }
