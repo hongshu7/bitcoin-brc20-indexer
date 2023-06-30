@@ -98,16 +98,11 @@ impl Brc20Index {
             let vout = input.previous_output.vout as i64;
             let key = (txid.clone(), vout);
 
-            // if empty there are no active transfers
-            if active_transfers.is_empty() {
-                continue;
-            }
-
             // Check if active transfer exists in the HashMap
-            if !active_transfers.contains_key(&key) {
-                continue;
-            } else {
+            if active_transfers.contains_key(&key) {
                 active_transfers.remove(&key);
+            } else {
+                continue;
             }
 
             // get mongo doc for transfers collection that matches the txid and vout
