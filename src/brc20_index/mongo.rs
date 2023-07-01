@@ -23,13 +23,14 @@ impl MongoClient {
     pub async fn new(
         connection_string: &str,
         db_name: &str,
+        mongo_direct_connection: bool,
     ) -> Result<Self, mongodb::error::Error> {
         let mut client_options = ClientOptions::parse(connection_string).await?;
         // Uncomment when using locally
         // Get the mongo host from environment variable if on local workstation
         let mongo_db_host = env::var("MONGO_DB_HOST");
         match mongo_db_host {
-            Ok(_host) => client_options.direct_connection = Some(true),
+            Ok(_host) => client_options.direct_connection = Some(mongo_direct_connection),
             Err(_) => (),
         };
 
