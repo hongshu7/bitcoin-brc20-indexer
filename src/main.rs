@@ -24,8 +24,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rpc_user: String;
     let rpc_password: String;
     let mongo_connection_str: String;
-    let direct_connection_str: String;
-    let direct_connection;
+    let mut mongo_direct_connection_str: String;
+    let mongo_direct_connection;
 
     // Check for CONSUL_HOST environment variable
     if let Ok(consul_host) = env::var("CONSUL_HOST") {
@@ -68,27 +68,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap()
             .to_string();
 
-        direct_connection_str = json_value
+        mongo_direct_connection_str = json_value
             .get("mongo_direct_connection")
             .unwrap()
             .as_str()
             .unwrap()
             .to_string();
 
-        direct_connection = direct_connection_str.to_lowercase() == "true";
+        // mongo_direct_connection = mongo_direct_connection_str.to_lowercase() == "true";
+        // let mongo_direct_connection_str_env = env::var("MONGO_DIRECT_CONNECTION").ok();
+        if let Ok(mongo_direct_connection_str_env) = env::var("MONGO_DIRECT_CONNECTION") {
+            mongo_direct_connection_str = mongo_direct_connection_str_env;
+        }
+              
 
+
+        
+        
+        mongo_direct_connection = mongo_direct_connection_str.to_lowercase() == "true";
         //MongoDB connection string
-        let mongo_host = json_value.get("mongo_rc").unwrap().as_array().unwrap();
+        let mongo_host_consul = json_value.get("mongo_rc").unwrap().as_array().unwrap();
+        let mongo_host_env = env::var("MONGO_DB_HOST").ok();
 
-        mongo_connection_str = format!(
-            "mongodb://{}:27017,{}:27017,{}:27017/omnisat?replicaSet=rs0",
-            mongo_host[0].as_str().unwrap(),
-            mongo_host[1].as_str().unwrap(),
-            mongo_host[2].as_str().unwrap(),
-        );
+        mongo_connection_str = if let Some(mongo_host_env) = mongo_host_env {
+            info!("here1");
+                format!("mongodb://{}:27017", mongo_host_env)
+        } else {
+            info!("here2");
+            format!(
+                "mongodb://{}:27017,{}:27017,{}:27017/omnisat?replicaSet=rs0",
+                mongo_host_consul[0].as_str().unwrap(),
+                mongo_host_consul[1].as_str().unwrap(),
+                mongo_host_consul[2].as_str().unwrap(),)
+        };
+
+        // mongo_connection_str = format!(
+        //     "mongodb://{}:27017,{}:27017,{}:27017/omnisat?replicaSet=rs0",
+        //     mongo_host_consul[0].as_str().unwrap(),
+        //     mongo_host_consul[1].as_str().unwrap(),
+        //     mongo_host_consul[2].as_str().unwrap(),
+        // );
     } else {
-        direct_connection_str = env::var("MONGO_DIRECT_CONNECTION").unwrap();
-        direct_connection = direct_connection_str.to_lowercase() == "true";
+        mongo_direct_connection_str = env::var("MONGO_DIRECT_CONNECTION").unwrap();
+        mongo_direct_connection = mongo_direct_connection_str.to_lowercase() == "true";
 
         // Pick up environment vars from .env file
         rpc_url = env::var("RPC_URL").unwrap();
@@ -109,10 +131,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Connect to Bitcoin Core RPC server
     let rpc = Client::new(&rpc_url, Auth::UserPass(rpc_user, rpc_password))?;
     info!("Connected to Bitcoin Core");
+    info!("mongo conn str{}",mongo_connection_str);
 
     // Get the mongo database name from environment variable
     let db_name = env::var("MONGO_DB_NAME").unwrap();
-    let mongo_client = MongoClient::new(&mongo_connection_str, &db_name, direct_connection).await?;
+    let mongo_client = MongoClient::new(&mongo_connection_str, &db_name, mongo_direct_connection).await?;
 
     // get block height to start indexing from
     let mut start_block_height = consts::BRC20_STARTING_BLOCK_HEIGHT; // default starting point
