@@ -10,9 +10,9 @@ use crate::brc20_index::user_balance::UserBalance;
 use futures_util::stream::TryStreamExt;
 use futures_util::StreamExt;
 use mongodb::bson::{doc, Bson, DateTime, Document};
-use mongodb::options::{FindOneOptions, FindOptions, UpdateOptions};
-use mongodb::Cursor;
+use mongodb::options::{FindOneOptions, FindOptions, IndexOptions, UpdateOptions};
 use mongodb::{bson, options::ClientOptions, Client};
+use mongodb::{Cursor, IndexModel};
 
 pub struct MongoClient {
     client: Client,
@@ -67,6 +67,50 @@ impl MongoClient {
         }
         Err(anyhow::anyhow!(
             "Failed to insert document after all retries"
+        ))
+    }
+
+    pub async fn update_document_by_filter_options(
+        &self,
+        collection_name: &str,
+        filter: Document,
+        update_doc: Document,
+        update_options: Option<UpdateOptions>,
+    ) -> anyhow::Result<()> {
+        self.update_one_with_retries_options(collection_name, filter, update_doc, update_options)
+            .await
+    }
+
+    pub async fn update_one_with_retries_options(
+        &self,
+        collection_name: &str,
+        filter: Document,
+        update: Document,
+        update_options: Option<UpdateOptions>,
+    ) -> anyhow::Result<()> {
+        let db = self.client.database(&self.db_name);
+        let collection = db.collection::<bson::Document>(collection_name);
+        let retries = consts::MONGO_RETRIES;
+
+        for attempt in 0..=retries {
+            match collection
+                .update_one(filter.clone(), update.clone(), update_options.clone())
+                .await
+            {
+                Ok(_) => return Ok(()),
+                Err(e) => {
+                    println!(
+                        "Attempt {}/{} failed with error: {}. Retrying...",
+                        attempt + 1,
+                        retries,
+                        e,
+                    );
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            }
+        }
+        Err(anyhow::anyhow!(
+            "Failed to update document after all retries"
         ))
     }
 
@@ -284,75 +328,117 @@ impl MongoClient {
         Ok(())
     }
 
+    // Method to update the balance document for a receiver in MongoDB
     pub async fn update_receiver_balance_document(
-        &self,
-        receiver_address: &String,
-        amount: f64,
-        tick: &str,
+        &self,                  // reference to the MongoClient
+        receiver_address: &str, // address of the receiver
+        amount: f64,            // amount to add
+        tick: &str,             // token symbol
     ) -> Result<(), anyhow::Error> {
+        // Prepare the filter document to find the specific user's balance document
         let filter = doc! {
-          "address": receiver_address,
-          "tick": tick
+            "address": receiver_address,
+            "tick": tick
         };
 
-        // retrieve the user balance for the receiver from MongoDB
-        let user_balance_to = self
-            .get_document_by_filter(consts::COLLECTION_USER_BALANCES, filter.clone())
-            .await?;
-
-        match user_balance_to {
-            // if the user balance document exists in Mongodb, update it
-            Some(mut user_balance_doc) => {
-                if let Some(overall_balance) = user_balance_doc.get(consts::OVERALL_BALANCE) {
-                    if let Bson::Double(val) = overall_balance {
-                        user_balance_doc
-                            .insert(consts::OVERALL_BALANCE, Bson::Double(val + amount));
-                    }
-                }
-
-                if let Some(available_balance) = user_balance_doc.get(consts::AVAILABLE_BALANCE) {
-                    if let Bson::Double(val) = available_balance {
-                        user_balance_doc
-                            .insert(consts::AVAILABLE_BALANCE, Bson::Double(val + amount));
-                    }
-                }
-
-                // create an update document
-                let update_doc = doc! {
-                    "$set": {
-                        consts::OVERALL_BALANCE: user_balance_doc.get(consts::OVERALL_BALANCE).unwrap_or_else(|| &Bson::Double(0.0)),
-                        consts::AVAILABLE_BALANCE: user_balance_doc.get(consts::AVAILABLE_BALANCE).unwrap_or_else(|| &Bson::Double(0.0)),
-                    }
-                };
-
-                // Update the document in MongoDB
-                self.update_document_by_filter(
-                    consts::COLLECTION_USER_BALANCES,
-                    filter,
-                    update_doc,
-                )
-                .await?;
+        // Prepare the update document to increment overall and available balances
+        // "$inc" operator increments the value of the field by the specified amount
+        let update_doc = doc! {
+            "$setOnInsert": { "transferable_balance": 0.0, "created_at": Bson::DateTime(DateTime::now()) },
+            "$inc": {
+                consts::OVERALL_BALANCE: amount,
+                consts::AVAILABLE_BALANCE: amount,
             }
-            // if the user balance document does not exist in MongoDB, create a new one
-            None => {
-                // Create a new UserBalance
-                let mut user_balance = UserBalance::new(receiver_address.clone(), tick.to_string());
-                user_balance.overall_balance = amount;
-                user_balance.available_balance = amount;
+        };
 
-                // Insert the new document into the MongoDB collection
-                self.insert_document(consts::COLLECTION_USER_BALANCES, user_balance.to_document())
-                    .await?;
-            }
-        }
+        // Prepare the options for the update operation
+        // Upsert is set to true which will insert a new document if no document matches the filter
+        let update_options = UpdateOptions::builder().upsert(true).build();
 
+        // Perform the update operation
+        // If a document matching the filter is found, it is updated
+        // If no matching document is found, a new document is inserted due to the upsert option
+        self.update_document_by_filter_options(
+            consts::COLLECTION_USER_BALANCES,
+            filter,
+            update_doc,
+            Some(update_options),
+        )
+        .await?;
+
+        // Return Ok if the operation is successful
         Ok(())
     }
+
+    // pub async fn update_receiver_balance_document_1(
+    //     &self,
+    //     receiver_address: &String,
+    //     amount: f64,
+    //     tick: &str,
+    // ) -> Result<(), anyhow::Error> {
+    //     let filter = doc! {
+    //       "address": receiver_address,
+    //       "tick": tick
+    //     };
+
+    //     // retrieve the user balance for the receiver from MongoDB
+    //     let user_balance_to = self
+    //         .get_document_by_filter(consts::COLLECTION_USER_BALANCES, filter.clone())
+    //         .await?;
+
+    //     match user_balance_to {
+    //         // if the user balance document exists in Mongodb, update it
+    //         Some(mut user_balance_doc) => {
+    //             if let Some(overall_balance) = user_balance_doc.get(consts::OVERALL_BALANCE) {
+    //                 if let Bson::Double(val) = overall_balance {
+    //                     user_balance_doc
+    //                         .insert(consts::OVERALL_BALANCE, Bson::Double(val + amount));
+    //                 }
+    //             }
+
+    //             if let Some(available_balance) = user_balance_doc.get(consts::AVAILABLE_BALANCE) {
+    //                 if let Bson::Double(val) = available_balance {
+    //                     user_balance_doc
+    //                         .insert(consts::AVAILABLE_BALANCE, Bson::Double(val + amount));
+    //                 }
+    //             }
+
+    //             // create an update document
+    //             let update_doc = doc! {
+    //                 "$set": {
+    //                     consts::OVERALL_BALANCE: user_balance_doc.get(consts::OVERALL_BALANCE).unwrap_or_else(|| &Bson::Double(0.0)),
+    //                     consts::AVAILABLE_BALANCE: user_balance_doc.get(consts::AVAILABLE_BALANCE).unwrap_or_else(|| &Bson::Double(0.0)),
+    //                 }
+    //             };
+
+    //             // Update the document in MongoDB
+    //             self.update_document_by_filter(
+    //                 consts::COLLECTION_USER_BALANCES,
+    //                 filter,
+    //                 update_doc,
+    //             )
+    //             .await?;
+    //         }
+    //         // if the user balance document does not exist in MongoDB, create a new one
+    //         None => {
+    //             // Create a new UserBalance
+    //             let mut user_balance = UserBalance::new(receiver_address.clone(), tick.to_string());
+    //             user_balance.overall_balance = amount;
+    //             user_balance.available_balance = amount;
+
+    //             // Insert the new document into the MongoDB collection
+    //             self.insert_document(consts::COLLECTION_USER_BALANCES, user_balance.to_document())
+    //                 .await?;
+    //         }
+    //     }
+
+    //     Ok(())
+    // }
 
     // This method will update the user balance document in MongoDB
     pub async fn update_sender_user_balance_document(
         &self,
-        from: &String,
+        from: &str,
         amount: f64,
         tick: &str,
     ) -> Result<(), anyhow::Error> {
@@ -360,80 +446,103 @@ impl MongoClient {
           "address": from,
           "tick": tick
         };
-        // retrieve the user balance from mongo
-        let user_balance_from = self
-            .get_document_by_filter(consts::COLLECTION_USER_BALANCES, filter.clone())
-            .await?;
 
-        match user_balance_from {
-            Some(mut user_balance_doc) => {
-                if let Some(overall_balance) = user_balance_doc.get(consts::OVERALL_BALANCE) {
-                    if let Bson::Double(val) = overall_balance {
-                        user_balance_doc
-                            .insert(consts::OVERALL_BALANCE, Bson::Double(val - amount));
-                    }
-                }
-
-                if let Some(transferable_balance) =
-                    user_balance_doc.get(consts::TRANSFERABLE_BALANCE)
-                {
-                    if let Bson::Double(val) = transferable_balance {
-                        user_balance_doc
-                            .insert(consts::TRANSFERABLE_BALANCE, Bson::Double(val - amount));
-                    }
-                }
-
-                let update_doc = doc! {
-                    "$set": {
-                        consts::TRANSFERABLE_BALANCE: user_balance_doc.get(consts::TRANSFERABLE_BALANCE).unwrap_or_else(|| &Bson::Double(0.0)),
-                        consts::OVERALL_BALANCE: user_balance_doc.get(consts::OVERALL_BALANCE).unwrap_or_else(|| &Bson::Double(0.0)),
-                    }
-                };
-
-                // Update the document in MongoDB
-                self.update_document_by_filter(
-                    consts::COLLECTION_USER_BALANCES,
-                    filter,
-                    update_doc,
-                )
-                .await?;
+        // Prepare the update document to decrement overall and transferable balances
+        // "$inc" operator increments the value of the field by the specified amount
+        // Here we are using negative amounts to decrease the balances
+        let update_doc = doc! {
+            "$inc": {
+                consts::OVERALL_BALANCE: -amount,
+                consts::TRANSFERABLE_BALANCE: -amount,
             }
-            None => {}
-        }
+        };
+
+        // Update the document in MongoDB
+        let update_options = UpdateOptions::builder().upsert(false).build();
+        self.update_document_by_filter_options(
+            consts::COLLECTION_USER_BALANCES,
+            filter,
+            update_doc,
+            Some(update_options),
+        )
+        .await?;
+
         Ok(())
     }
 
+    // pub async fn update_sender_user_balance_document_1(
+    //     &self,
+    //     from: &String,
+    //     amount: f64,
+    //     tick: &str,
+    // ) -> Result<(), anyhow::Error> {
+    //     let filter = doc! {
+    //       "address": from,
+    //       "tick": tick
+    //     };
+    //     // retrieve the user balance from mongo
+    //     let user_balance_from = self
+    //         .get_document_by_filter(consts::COLLECTION_USER_BALANCES, filter.clone())
+    //         .await?;
+
+    //     match user_balance_from {
+    //         Some(mut user_balance_doc) => {
+    //             if let Some(overall_balance) = user_balance_doc.get(consts::OVERALL_BALANCE) {
+    //                 if let Bson::Double(val) = overall_balance {
+    //                     user_balance_doc
+    //                         .insert(consts::OVERALL_BALANCE, Bson::Double(val - amount));
+    //                 }
+    //             }
+
+    //             if let Some(transferable_balance) =
+    //                 user_balance_doc.get(consts::TRANSFERABLE_BALANCE)
+    //             {
+    //                 if let Bson::Double(val) = transferable_balance {
+    //                     user_balance_doc
+    //                         .insert(consts::TRANSFERABLE_BALANCE, Bson::Double(val - amount));
+    //                 }
+    //             }
+
+    //             let update_doc = doc! {
+    //                 "$set": {
+    //                     consts::TRANSFERABLE_BALANCE: user_balance_doc.get(consts::TRANSFERABLE_BALANCE).unwrap_or_else(|| &Bson::Double(0.0)),
+    //                     consts::OVERALL_BALANCE: user_balance_doc.get(consts::OVERALL_BALANCE).unwrap_or_else(|| &Bson::Double(0.0)),
+    //                 }
+    //             };
+
+    //             // Update the document in MongoDB
+    //             self.update_document_by_filter(
+    //                 consts::COLLECTION_USER_BALANCES,
+    //                 filter,
+    //                 update_doc,
+    //             )
+    //             .await?;
+    //         }
+    //         None => {}
+    //     }
+    //     Ok(())
+    // }
+
     pub async fn update_transfer_inscriber_user_balance_document(
         &self,
-        from: &String,
+        from: &str,
         amount: f64,
         tick: &str,
-        user_balance_from: Document,
     ) -> Result<(), anyhow::Error> {
+        // Prepare the filter document
         let filter = doc! {
-          "address": from,
-          "tick": tick
+            "address": from,
+            "tick": tick
         };
 
-        let mut user_balance_doc = user_balance_from;
-
-        if let Some(available_balance) = user_balance_doc.get(consts::AVAILABLE_BALANCE) {
-            if let Bson::Double(val) = available_balance {
-                user_balance_doc.insert(consts::AVAILABLE_BALANCE, Bson::Double(val - amount));
-            }
-        }
-
-        if let Some(transferable_balance) = user_balance_doc.get(consts::TRANSFERABLE_BALANCE) {
-            if let Bson::Double(val) = transferable_balance {
-                user_balance_doc.insert(consts::TRANSFERABLE_BALANCE, Bson::Double(val + amount));
-            }
-        }
-
-        // create an update document
+        // Prepare the update document
+        // "$inc" operator increments the value of the field by the specified amount
+        // Here, it's decrementing the `consts::AVAILABLE_BALANCE` by `amount`
+        // and incrementing the `consts::TRANSFERABLE_BALANCE` by `amount`
         let update_doc = doc! {
-            "$set": {
-                consts::TRANSFERABLE_BALANCE: user_balance_doc.get(consts::TRANSFERABLE_BALANCE).unwrap_or_else(|| &Bson::Double(0.0)),
-                consts::AVAILABLE_BALANCE: user_balance_doc.get(consts::AVAILABLE_BALANCE).unwrap_or_else(|| &Bson::Double(0.0)),
+            "$inc": {
+                consts::AVAILABLE_BALANCE: -amount,
+                consts::TRANSFERABLE_BALANCE: amount,
             }
         };
 
@@ -443,6 +552,47 @@ impl MongoClient {
 
         Ok(())
     }
+
+    // pub async fn update_transfer_inscriber_user_balance_document_1(
+    //     &self,
+    //     from: &String,
+    //     amount: f64,
+    //     tick: &str,
+    //     user_balance_from: Document,
+    // ) -> Result<(), anyhow::Error> {
+    //     let filter = doc! {
+    //       "address": from,
+    //       "tick": tick
+    //     };
+
+    //     let mut user_balance_doc = user_balance_from;
+
+    //     if let Some(available_balance) = user_balance_doc.get(consts::AVAILABLE_BALANCE) {
+    //         if let Bson::Double(val) = available_balance {
+    //             user_balance_doc.insert(consts::AVAILABLE_BALANCE, Bson::Double(val - amount));
+    //         }
+    //     }
+
+    //     if let Some(transferable_balance) = user_balance_doc.get(consts::TRANSFERABLE_BALANCE) {
+    //         if let Bson::Double(val) = transferable_balance {
+    //             user_balance_doc.insert(consts::TRANSFERABLE_BALANCE, Bson::Double(val + amount));
+    //         }
+    //     }
+
+    //     // create an update document
+    //     let update_doc = doc! {
+    //         "$set": {
+    //             consts::TRANSFERABLE_BALANCE: user_balance_doc.get(consts::TRANSFERABLE_BALANCE).unwrap_or_else(|| &Bson::Double(0.0)),
+    //             consts::AVAILABLE_BALANCE: user_balance_doc.get(consts::AVAILABLE_BALANCE).unwrap_or_else(|| &Bson::Double(0.0)),
+    //         }
+    //     };
+
+    //     // Update the document in MongoDB
+    //     self.update_document_by_filter(consts::COLLECTION_USER_BALANCES, filter, update_doc)
+    //         .await?;
+
+    //     Ok(())
+    // }
 
     pub async fn update_brc20_ticker_total_minted(
         &self,
@@ -819,6 +969,21 @@ impl MongoClient {
             }
         }
 
+        Ok(())
+    }
+
+    pub async fn create_indexes(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let db = self.client.database(&self.db_name);
+        let collection = db.collection::<bson::Document>(consts::COLLECTION_USER_BALANCES);
+
+        // Create an index on the 'address' and 'tick' fields
+        let index_model = IndexModel::builder()
+            .keys(doc! { "address": 1, "tick": 1 }) // 1 for ascending
+            .options(IndexOptions::builder().unique(true).build())
+            .build();
+
+        // Create the index
+        collection.create_index(index_model, None).await?;
         Ok(())
     }
 }

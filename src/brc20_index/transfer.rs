@@ -144,7 +144,6 @@ impl Brc20Transfer {
                         &from.to_string(),
                         transfer_amount,
                         ticker_symbol,
-                        user_balance,
                     )
                     .await?;
 

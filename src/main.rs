@@ -80,11 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Ok(mongo_direct_connection_str_env) = env::var("MONGO_DIRECT_CONNECTION") {
             mongo_direct_connection_str = mongo_direct_connection_str_env;
         }
-              
 
-
-        
-        
         mongo_direct_connection = mongo_direct_connection_str.to_lowercase() == "true";
         //MongoDB connection string
         let mongo_host_consul = json_value.get("mongo_rc").unwrap().as_array().unwrap();
@@ -92,14 +88,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         mongo_connection_str = if let Some(mongo_host_env) = mongo_host_env {
             info!("here1");
-                format!("mongodb://{}:27017", mongo_host_env)
+            format!("mongodb://{}:27017", mongo_host_env)
         } else {
             info!("here2");
             format!(
                 "mongodb://{}:27017,{}:27017,{}:27017/omnisat?replicaSet=rs0",
                 mongo_host_consul[0].as_str().unwrap(),
                 mongo_host_consul[1].as_str().unwrap(),
-                mongo_host_consul[2].as_str().unwrap(),)
+                mongo_host_consul[2].as_str().unwrap(),
+            )
         };
 
         // mongo_connection_str = format!(
@@ -131,11 +128,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Connect to Bitcoin Core RPC server
     let rpc = Client::new(&rpc_url, Auth::UserPass(rpc_user, rpc_password))?;
     info!("Connected to Bitcoin Core");
-    info!("mongo conn str{}",mongo_connection_str);
+    info!("mongo conn str{}", mongo_connection_str);
 
     // Get the mongo database name from environment variable
     let db_name = env::var("MONGO_DB_NAME").unwrap();
-    let mongo_client = MongoClient::new(&mongo_connection_str, &db_name, mongo_direct_connection).await?;
+    let mongo_client =
+        MongoClient::new(&mongo_connection_str, &db_name, mongo_direct_connection).await?;
+
+    // Call create_indexes after MongoClient has been initialized
+    mongo_client.create_indexes().await?;
 
     // get block height to start indexing from
     let mut start_block_height = consts::BRC20_STARTING_BLOCK_HEIGHT; // default starting point
