@@ -435,37 +435,54 @@ impl MongoClient {
         ticker: &str,
         amount_to_add: f64,
     ) -> anyhow::Result<()> {
-        // Retrieve the brc20ticker document
         let filter = doc! { "tick": ticker };
-        let ticker_doc = self
-            .find_one_with_retries(consts::COLLECTION_TICKERS, filter.clone(), None)
+        let update_doc = doc! {
+            "$inc": { "total_minted": amount_to_add }
+        };
+
+        // Update the document in the collection with retries
+        self.update_one_with_retries(consts::COLLECTION_TICKERS, filter, update_doc)
             .await?;
-
-        match ticker_doc {
-            Some(mut ticker) => {
-                if let Some(total_minted) = ticker.get("total_minted") {
-                    if let Bson::Double(val) = total_minted {
-                        ticker.insert("total_minted", Bson::Double(val + amount_to_add));
-                    }
-                }
-
-                let update_doc = doc! {
-                    "$set": {
-                        "total_minted": ticker.get("total_minted").unwrap_or_else(|| &Bson::Double(0.0)),
-                    }
-                };
-
-                // Update the document in the collection with retries
-                self.update_one_with_retries(consts::COLLECTION_TICKERS, filter, update_doc)
-                    .await?;
-            }
-            None => {
-                println!("No ticker document found for ticker {}", ticker);
-            }
-        }
 
         Ok(())
     }
+
+    // pub async fn update_brc20_ticker_total_minted_1(
+    //     &self,
+    //     ticker: &str,
+    //     amount_to_add: f64,
+    // ) -> anyhow::Result<()> {
+    //     // Retrieve the brc20ticker document
+    //     let filter = doc! { "tick": ticker };
+    //     let ticker_doc = self
+    //         .find_one_with_retries(consts::COLLECTION_TICKERS, filter.clone(), None)
+    //         .await?;
+
+    //     match ticker_doc {
+    //         Some(mut ticker) => {
+    //             if let Some(total_minted) = ticker.get("total_minted") {
+    //                 if let Bson::Double(val) = total_minted {
+    //                     ticker.insert("total_minted", Bson::Double(val + amount_to_add));
+    //                 }
+    //             }
+
+    //             let update_doc = doc! {
+    //                 "$set": {
+    //                     "total_minted": ticker.get("total_minted").unwrap_or_else(|| &Bson::Double(0.0)),
+    //                 }
+    //             };
+
+    //             // Update the document in the collection with retries
+    //             self.update_one_with_retries(consts::COLLECTION_TICKERS, filter, update_doc)
+    //                 .await?;
+    //         }
+    //         None => {
+    //             println!("No ticker document found for ticker {}", ticker);
+    //         }
+    //     }
+
+    //     Ok(())
+    // }
 
     pub async fn store_completed_block(&self, block_height: i64) -> anyhow::Result<()> {
         let document = doc! {
@@ -810,16 +827,32 @@ impl MongoClient {
 
     pub async fn create_indexes(&self) -> Result<(), Box<dyn std::error::Error>> {
         let db = self.client.database(&self.db_name);
-        let collection = db.collection::<bson::Document>(consts::COLLECTION_USER_BALANCES);
 
-        // Create an index on the 'address' and 'tick' fields
-        let index_model = IndexModel::builder()
+        // Create an index on the 'address' and 'tick' fields for COLLECTION_USER_BALANCES
+        let user_balances_collection =
+            db.collection::<bson::Document>(consts::COLLECTION_USER_BALANCES);
+        let user_balances_index_model = IndexModel::builder()
             .keys(doc! { "address": 1, "tick": 1 }) // 1 for ascending
             .options(IndexOptions::builder().unique(true).build())
             .build();
 
-        // Create the index
-        collection.create_index(index_model, None).await?;
+        // Create the index for COLLECTION_USER_BALANCES
+        user_balances_collection
+            .create_index(user_balances_index_model, None)
+            .await?;
+
+        // Create an index on the 'tick' field for COLLECTION_TICKERS
+        let tickers_collection = db.collection::<bson::Document>(consts::COLLECTION_TICKERS);
+        let tickers_index_model = IndexModel::builder()
+            .keys(doc! { "tick": 1 }) // 1 for ascending
+            .options(IndexOptions::builder().unique(true).build())
+            .build();
+
+        // Create the index for COLLECTION_TICKERS
+        tickers_collection
+            .create_index(tickers_index_model, None)
+            .await?;
+
         Ok(())
     }
 }
