@@ -57,6 +57,8 @@ pub async fn index_brc20(
                         let mut mint_documents = Vec::new();
                         let mut transfer_documents = Vec::new();
                         let mut deploy_documents = Vec::new();
+                        // Initialize a new hashmap for the tickers in this block
+                        let mut tickers: HashMap<String, Document> = HashMap::new();
 
                         let mut tx_height = 0u32;
                         for transaction in block.txdata {
@@ -86,7 +88,7 @@ pub async fn index_brc20(
                                     // log raw brc20 data
                                     let pretty_json =
                                         serde_json::to_string(&inscription).unwrap_or_default();
-                                    info!("Raw Brc-20 data: {}", pretty_json);
+                                    log::debug!("Raw Brc-20 data: {}", pretty_json);
 
                                     // get owner address, inscription is first satoshi of first output
                                     let owner = match get_owner_of_vout(&raw_tx, 0) {
@@ -131,6 +133,7 @@ pub async fn index_brc20(
                                                 owner,
                                                 inscription,
                                                 &raw_tx,
+                                                &mut tickers,
                                             )
                                             .await
                                             {

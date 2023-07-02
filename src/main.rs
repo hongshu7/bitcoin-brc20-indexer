@@ -87,10 +87,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mongo_host_env = env::var("MONGO_DB_HOST").ok();
 
         mongo_connection_str = if let Some(mongo_host_env) = mongo_host_env {
-            info!("here1");
             format!("mongodb://{}:27017", mongo_host_env)
         } else {
-            info!("here2");
             format!(
                 "mongodb://{}:27017,{}:27017,{}:27017/omnisat?replicaSet=rs0",
                 mongo_host_consul[0].as_str().unwrap(),
@@ -128,7 +126,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Connect to Bitcoin Core RPC server
     let rpc = Client::new(&rpc_url, Auth::UserPass(rpc_user, rpc_password))?;
     info!("Connected to Bitcoin Core");
-    info!("mongo conn str{}", mongo_connection_str);
 
     // Get the mongo database name from environment variable
     let db_name = env::var("MONGO_DB_NAME").unwrap();

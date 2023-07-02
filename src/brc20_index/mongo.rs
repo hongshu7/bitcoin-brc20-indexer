@@ -564,13 +564,6 @@ impl MongoClient {
         }
     }
 
-    pub fn get_i32(&self, doc: &Document, field: &str) -> Option<i32> {
-        match doc.get(field) {
-            Some(Bson::Int32(value)) => Some(*value),
-            _ => None,
-        }
-    }
-
     pub fn get_f64(&self, doc: &Document, field: &str) -> Option<f64> {
         match doc.get(field) {
             Some(Bson::Double(value)) => Some(*value),
