@@ -651,8 +651,8 @@ impl MongoClient {
 
     pub async fn load_active_transfers_with_retry(
         &self,
-        retries: u32,
     ) -> Result<Option<HashMap<(String, i64), Brc20ActiveTransfer>>, String> {
+        let retries = consts::MONGO_RETRIES;
         for attempt in 0..=retries {
             match self.load_active_transfers().await {
                 Ok(result) => return Ok(result),

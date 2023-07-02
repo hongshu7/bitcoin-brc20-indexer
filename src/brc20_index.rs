@@ -45,10 +45,8 @@ pub async fn index_brc20(
                             current_block_hash, length, current_block_height
                         );
 
-                        let retries = 5;
-                        let mut active_transfers_opt = mongo_client
-                            .load_active_transfers_with_retry(retries)
-                            .await?;
+                        let mut active_transfers_opt =
+                            mongo_client.load_active_transfers_with_retry().await?;
 
                         // If active_transfers_opt is None, initialize it with a new HashMap
                         if active_transfers_opt.is_none() {
@@ -315,7 +313,7 @@ pub async fn check_for_transfer_send(
                     *acc += output.value;
                     Some(*acc)
                 })
-                .position(|value| value >= input_value_sum)
+                .position(|value| value > input_value_sum)
                 .unwrap_or(transaction.output.len() - 1)
         } else {
             0
