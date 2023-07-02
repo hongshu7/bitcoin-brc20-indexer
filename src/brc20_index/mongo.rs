@@ -6,7 +6,6 @@ use super::transfer::Brc20ActiveTransfer;
 use super::user_balance::{UserBalanceEntry, UserBalanceEntryType};
 use super::ToDocument;
 use crate::brc20_index::consts;
-use crate::brc20_index::user_balance::UserBalance;
 use futures_util::stream::TryStreamExt;
 use futures_util::StreamExt;
 use mongodb::bson::{doc, Bson, DateTime, Document};
