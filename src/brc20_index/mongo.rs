@@ -76,11 +76,11 @@ impl MongoClient {
         update_doc: Document,
         update_options: Option<UpdateOptions>,
     ) -> anyhow::Result<()> {
-        self.update_one_with_retries_options(collection_name, filter, update_doc, update_options)
+        self.update_one_with_retries(collection_name, filter, update_doc, update_options)
             .await
     }
 
-    pub async fn update_one_with_retries_options(
+    pub async fn update_one_with_retries(
         &self,
         collection_name: &str,
         filter: Document,
@@ -89,39 +89,6 @@ impl MongoClient {
     ) -> anyhow::Result<()> {
         let db = self.client.database(&self.db_name);
         let collection = db.collection::<bson::Document>(collection_name);
-        let retries = consts::MONGO_RETRIES;
-
-        for attempt in 0..=retries {
-            match collection
-                .update_one(filter.clone(), update.clone(), update_options.clone())
-                .await
-            {
-                Ok(_) => return Ok(()),
-                Err(e) => {
-                    println!(
-                        "Attempt {}/{} failed with error: {}. Retrying...",
-                        attempt + 1,
-                        retries,
-                        e,
-                    );
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                }
-            }
-        }
-        Err(anyhow::anyhow!(
-            "Failed to update document after all retries"
-        ))
-    }
-
-    pub async fn update_one_with_retries(
-        &self,
-        collection_name: &str,
-        filter: Document,
-        update: Document,
-    ) -> anyhow::Result<()> {
-        let db = self.client.database(&self.db_name);
-        let collection = db.collection::<bson::Document>(collection_name);
-        let update_options = UpdateOptions::builder().upsert(false).build();
         let retries = consts::MONGO_RETRIES;
 
         for attempt in 0..=retries {
@@ -285,8 +252,9 @@ impl MongoClient {
         field_value: &str,
         update_doc: Document,
     ) -> anyhow::Result<()> {
+        let update_options = UpdateOptions::builder().upsert(false).build();
         let filter = doc! { field_name: field_value };
-        self.update_one_with_retries(collection_name, filter, update_doc)
+        self.update_one_with_retries(collection_name, filter, update_doc, Some(update_options))
             .await
     }
 
@@ -435,54 +403,23 @@ impl MongoClient {
         ticker: &str,
         amount_to_add: f64,
     ) -> anyhow::Result<()> {
+        let update_options = UpdateOptions::builder().upsert(false).build();
         let filter = doc! { "tick": ticker };
         let update_doc = doc! {
             "$inc": { "total_minted": amount_to_add }
         };
 
         // Update the document in the collection with retries
-        self.update_one_with_retries(consts::COLLECTION_TICKERS, filter, update_doc)
-            .await?;
+        self.update_one_with_retries(
+            consts::COLLECTION_TICKERS,
+            filter,
+            update_doc,
+            Some(update_options),
+        )
+        .await?;
 
         Ok(())
     }
-
-    // pub async fn update_brc20_ticker_total_minted_1(
-    //     &self,
-    //     ticker: &str,
-    //     amount_to_add: f64,
-    // ) -> anyhow::Result<()> {
-    //     // Retrieve the brc20ticker document
-    //     let filter = doc! { "tick": ticker };
-    //     let ticker_doc = self
-    //         .find_one_with_retries(consts::COLLECTION_TICKERS, filter.clone(), None)
-    //         .await?;
-
-    //     match ticker_doc {
-    //         Some(mut ticker) => {
-    //             if let Some(total_minted) = ticker.get("total_minted") {
-    //                 if let Bson::Double(val) = total_minted {
-    //                     ticker.insert("total_minted", Bson::Double(val + amount_to_add));
-    //                 }
-    //             }
-
-    //             let update_doc = doc! {
-    //                 "$set": {
-    //                     "total_minted": ticker.get("total_minted").unwrap_or_else(|| &Bson::Double(0.0)),
-    //                 }
-    //             };
-
-    //             // Update the document in the collection with retries
-    //             self.update_one_with_retries(consts::COLLECTION_TICKERS, filter, update_doc)
-    //                 .await?;
-    //         }
-    //         None => {
-    //             println!("No ticker document found for ticker {}", ticker);
-    //         }
-    //     }
-
-    //     Ok(())
-    // }
 
     pub async fn store_completed_block(&self, block_height: i64) -> anyhow::Result<()> {
         let document = doc! {
@@ -807,6 +744,7 @@ impl MongoClient {
 
         // Get the tickers array from the ticker totals document
         let ticker_totals = ticker_totals_doc.get_array("tickers")?;
+        let update_options = UpdateOptions::builder().upsert(false).build();
 
         for ticker_doc in ticker_totals {
             if let Bson::Document(ticker_doc) = ticker_doc {
@@ -817,8 +755,13 @@ impl MongoClient {
                 let filter = doc! { "tick": tick };
                 let update = doc! { "$set": { "total_minted": total_minted } };
 
-                self.update_one_with_retries(consts::COLLECTION_TICKERS, filter, update)
-                    .await?;
+                self.update_one_with_retries(
+                    consts::COLLECTION_TICKERS,
+                    filter,
+                    update,
+                    Some(update_options.clone()),
+                )
+                .await?;
             }
         }
 

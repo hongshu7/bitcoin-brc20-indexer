@@ -147,7 +147,7 @@ impl Brc20Mint {
     }
 }
 
-pub async fn validate_and_insert_mint(
+pub async fn pre_validate_mint(
     mongo_client: &MongoClient,
     block_height: u32,
     tx_height: u32,
@@ -155,18 +155,11 @@ pub async fn validate_and_insert_mint(
     inscription: Brc20Inscription,
     raw_tx: &GetRawTransactionResult,
 ) -> Result<Brc20Mint, Box<dyn std::error::Error>> {
-    let validated_mint_tx = Brc20Mint::new(&raw_tx, inscription, block_height, tx_height, owner)
-        .validate_mint(mongo_client)
-        .await?;
-
-    if validated_mint_tx.is_valid() {
-        // Add the mint transaction to the mongo database
-        mongo_client
-            .insert_document(consts::COLLECTION_MINTS, validated_mint_tx.to_document())
-            .await?;
-    }
-
-    Ok(validated_mint_tx)
+    Ok(
+        Brc20Mint::new(&raw_tx, inscription, block_height, tx_height, owner)
+            .validate_mint(mongo_client)
+            .await?,
+    )
 }
 
 pub async fn update_balances_and_ticker(
@@ -213,8 +206,8 @@ pub async fn handle_mint_operation(
     owner: Address,
     inscription: Brc20Inscription,
     raw_tx: &GetRawTransactionResult,
-) -> Result<bool, Box<dyn std::error::Error>> {
-    let validated_mint_tx = validate_and_insert_mint(
+) -> Result<Brc20Mint, Box<dyn std::error::Error>> {
+    let validated_mint_tx = pre_validate_mint(
         mongo_client,
         block_height,
         tx_height,
@@ -233,9 +226,7 @@ pub async fn handle_mint_operation(
         info!("TO Address: {:?}", validated_mint_tx.to);
 
         update_balances_and_ticker(mongo_client, &validated_mint_tx).await?;
-
-        return Ok(true);
-    } else {
-        return Ok(false);
     }
+
+    Ok(validated_mint_tx)
 }

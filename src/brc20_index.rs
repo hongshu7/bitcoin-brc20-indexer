@@ -53,6 +53,9 @@ pub async fn index_brc20(
                             active_transfers_opt = Some(HashMap::new());
                         }
 
+                        // Buffer for bulk operations
+                        let mut mint_documents = Vec::new();
+
                         let mut tx_height = 0u32;
                         for transaction in block.txdata {
                             let txid = transaction.txid();
@@ -124,7 +127,12 @@ pub async fn index_brc20(
                                             )
                                             .await
                                             {
-                                                Ok(found) => inscription_found = found,
+                                                Ok(mint_op) => {
+                                                    inscription_found = mint_op.is_valid();
+                                                    if inscription_found {
+                                                        mint_documents.push(mint_op.to_document());
+                                                    }
+                                                }
                                                 Err(e) => {
                                                     error!(
                                                         "Error handling mint operation: {:?}",
@@ -187,6 +195,13 @@ pub async fn index_brc20(
 
                             // Increment the tx height
                             tx_height += 1;
+                        }
+
+                        // Bulk write mints to mongodb
+                        if !mint_documents.is_empty() {
+                            mongo_client
+                                .insert_many_with_retries(consts::COLLECTION_MINTS, mint_documents)
+                                .await?;
                         }
 
                         // drop mongodb collection right before inserting active transfers
