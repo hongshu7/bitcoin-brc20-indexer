@@ -68,13 +68,9 @@ impl Brc20Mint {
     pub async fn validate_mint<'a>(
         mut self,
         mongo_client: &MongoClient,
-        tickers: &mut HashMap<String, Document>,
+        ticker_doc_opt: Option<&Document>,
     ) -> Result<Brc20Mint, Box<dyn std::error::Error>> {
         let mut reason = String::new();
-
-        // Try to get the ticker from the hashmap
-        let ticker_doc_opt =
-            get_ticker(tickers, &self.inscription.tick.to_lowercase(), mongo_client).await;
 
         if let Some(ticker_doc) = ticker_doc_opt {
             // get values from ticker doc
@@ -200,7 +196,7 @@ async fn update_ticker_total_minted(
 
         // Update the total minted amount in MongoDB
         mongo_client
-            .update_brc20_ticker_total_minted(ticker_symbol, new_total_minted)
+            .update_brc20_ticker_total_minted(ticker_symbol, mint_amount)
             .await?;
     }
 
@@ -216,9 +212,12 @@ pub async fn pre_validate_mint(
     raw_tx: &GetRawTransactionResult,
     tickers: &mut HashMap<String, Document>,
 ) -> Result<Brc20Mint, Box<dyn std::error::Error>> {
+    // Try to get the ticker from the hashmap if not, then mongodb
+    let ticker_doc_opt = get_ticker(tickers, &inscription.tick.to_lowercase(), mongo_client).await;
+
     // Create a new Brc20Mint instance
     let new_mint = Brc20Mint::new(&raw_tx, inscription, block_height, tx_height, owner);
-    new_mint.validate_mint(mongo_client, tickers).await
+    new_mint.validate_mint(mongo_client, ticker_doc_opt).await
 }
 
 pub async fn update_balances_and_ticker(
