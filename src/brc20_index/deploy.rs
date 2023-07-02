@@ -231,7 +231,7 @@ pub async fn handle_deploy_operation(
     owner: Address,
     block_height: u32,
     tx_height: u32,
-) -> Result<bool, Box<dyn std::error::Error>> {
+) -> Result<Brc20Deploy, Box<dyn std::error::Error>> {
     // if invalid vaiidate_deploy_script handles and adds invalid to mongodb
     let validated_deploy_tx = Brc20Deploy::new(raw_tx, inscription, block_height, tx_height, owner)
         .validate_deploy_script(&mongo_client)
@@ -253,21 +253,20 @@ pub async fn handle_deploy_operation(
             .await?;
 
         // Insert the valid deploy transaction into MongoDB
-        mongo_client
-            .insert_document(
-                consts::COLLECTION_DEPLOYS,
-                validated_deploy_tx.to_document(),
-            )
-            .await?;
-
-        return Ok(true);
+        // mongo_client
+        //     .insert_document(
+        //         consts::COLLECTION_DEPLOYS,
+        //         validated_deploy_tx.to_document(),
+        //     )
+        //     .await?;
     } else {
         error!(
             "Invalid deploy: {:?}",
             validated_deploy_tx.get_deploy_script()
         );
-        return Ok(false);
     }
+
+    Ok(validated_deploy_tx)
 }
 
 // A helper function to find out the decimal places of the given float

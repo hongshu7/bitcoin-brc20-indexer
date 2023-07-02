@@ -78,7 +78,6 @@ impl Brc20Transfer {
         mongo_client: &MongoClient,
         active_transfers: &mut Option<HashMap<(String, i64), Brc20ActiveTransfer>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let from = &self.from;
         let ticker_symbol = &self.inscription.tick.to_lowercase();
 
         // get ticker doc from mongo
@@ -101,8 +100,8 @@ impl Brc20Transfer {
 
         // get the user balance from mongo
         let filter = doc! {
-          "address": from.to_string(),
-          "tick": self.inscription.tick.to_lowercase(),
+          "address": &self.from.to_string(),
+          "tick": ticker_symbol,
         };
 
         let user_balance_from = mongo_client
@@ -124,7 +123,7 @@ impl Brc20Transfer {
 
             // check if user has enough balance to transfer
             if available_balance >= transfer_amount {
-                println!("VALID: Transfer inscription added. From: {:#?}", from);
+                println!("VALID: Transfer inscription added. From: {:#?}", self.from);
                 self.is_valid = true;
 
                 // insert user balance entry
@@ -132,7 +131,7 @@ impl Brc20Transfer {
                     .insert_user_balance_entry(
                         &self.from.to_string(),
                         transfer_amount,
-                        &self.inscription.tick.to_lowercase(),
+                        ticker_symbol,
                         self.block_height.into(),
                         UserBalanceEntryType::Inscription,
                     )
@@ -141,7 +140,7 @@ impl Brc20Transfer {
                 // Update the user balance document in MongoDB
                 mongo_client
                     .update_transfer_inscriber_user_balance_document(
-                        &from.to_string(),
+                        &self.from.to_string(),
                         transfer_amount,
                         ticker_symbol,
                     )
@@ -208,7 +207,7 @@ pub async fn handle_transfer_operation(
     raw_tx: &GetRawTransactionResult,
     sender: Address,
     active_transfers: &mut Option<HashMap<(String, i64), Brc20ActiveTransfer>>,
-) -> Result<bool, Box<dyn std::error::Error>> {
+) -> Result<Brc20Transfer, Box<dyn std::error::Error>> {
     // Create a new transfer transaction
     let mut validated_transfer_tx =
         Brc20Transfer::new(raw_tx, inscription, block_height, tx_height, sender);
@@ -223,19 +222,9 @@ pub async fn handle_transfer_operation(
             "Transfer: {:?}",
             validated_transfer_tx.get_transfer_script()
         );
-
-        // Add the valid transfer to the mongo database
-        mongo_client
-            .insert_document(
-                consts::COLLECTION_TRANSFERS,
-                validated_transfer_tx.to_document(),
-            )
-            .await?;
-
-        return Ok(true);
-    } else {
-        return Ok(false);
     }
+
+    Ok(validated_transfer_tx)
 }
 
 impl ToDocument for Brc20Transfer {

@@ -53,8 +53,10 @@ pub async fn index_brc20(
                             active_transfers_opt = Some(HashMap::new());
                         }
 
-                        // Buffer for bulk operations
+                        // Vectors for mongo bulk writes
                         let mut mint_documents = Vec::new();
+                        let mut transfer_documents = Vec::new();
+                        let mut deploy_documents = Vec::new();
 
                         let mut tx_height = 0u32;
                         for transaction in block.txdata {
@@ -107,7 +109,12 @@ pub async fn index_brc20(
                                             )
                                             .await
                                             {
-                                                Ok(found) => inscription_found = found,
+                                                Ok(deploy) => {
+                                                    inscription_found = deploy.is_valid();
+                                                    if inscription_found {
+                                                        deploy_documents.push(deploy.to_document());
+                                                    }
+                                                }
                                                 Err(e) => {
                                                     error!(
                                                         "Error handling deploy operation: {:?}",
@@ -127,10 +134,10 @@ pub async fn index_brc20(
                                             )
                                             .await
                                             {
-                                                Ok(mint_op) => {
-                                                    inscription_found = mint_op.is_valid();
+                                                Ok(mint) => {
+                                                    inscription_found = mint.is_valid();
                                                     if inscription_found {
-                                                        mint_documents.push(mint_op.to_document());
+                                                        mint_documents.push(mint.to_document());
                                                     }
                                                 }
                                                 Err(e) => {
@@ -153,7 +160,13 @@ pub async fn index_brc20(
                                             )
                                             .await
                                             {
-                                                Ok(found) => inscription_found = found,
+                                                Ok(transfer) => {
+                                                    inscription_found = transfer.is_valid();
+                                                    if inscription_found {
+                                                        transfer_documents
+                                                            .push(transfer.to_document());
+                                                    }
+                                                }
                                                 Err(e) => {
                                                     error!(
                                                         "Error handling transfer inscription: {:?}",
@@ -201,6 +214,26 @@ pub async fn index_brc20(
                         if !mint_documents.is_empty() {
                             mongo_client
                                 .insert_many_with_retries(consts::COLLECTION_MINTS, mint_documents)
+                                .await?;
+                        }
+
+                        // Bulk write transfers to mongodb
+                        if !transfer_documents.is_empty() {
+                            mongo_client
+                                .insert_many_with_retries(
+                                    consts::COLLECTION_TRANSFERS,
+                                    transfer_documents,
+                                )
+                                .await?;
+                        }
+
+                        // Bulk write deploys to mongodb
+                        if !deploy_documents.is_empty() {
+                            mongo_client
+                                .insert_many_with_retries(
+                                    consts::COLLECTION_DEPLOYS,
+                                    deploy_documents,
+                                )
                                 .await?;
                         }
 
