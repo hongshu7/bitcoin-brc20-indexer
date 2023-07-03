@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use super::transfer::Brc20ActiveTransfer;
 use super::user_balance::{UserBalanceEntry, UserBalanceEntryType};
-use super::ToDocument;
 use crate::brc20_index::consts;
 use futures_util::stream::TryStreamExt;
 use futures_util::StreamExt;

@@ -36,6 +36,8 @@ pub struct Brc20Transfer {
     pub tx: GetRawTransactionResult,
     pub inscription: Brc20Inscription,
     pub send_tx: Option<GetRawTransactionResult>,
+    pub send_block_height: Option<u32>,
+    pub send_tx_height: Option<u32>,
     pub from: Address,
     pub to: Option<Address>,
     pub is_valid: bool,
@@ -61,6 +63,8 @@ impl Brc20Transfer {
             tx_height,
             tx: inscription_tx.clone(),
             send_tx: None,
+            send_block_height: None,
+            send_tx_height: None,
             inscription,
             from,
             to: None,
@@ -240,6 +244,8 @@ impl ToDocument for Brc20Transfer {
             "tx": self.tx.to_document(), // Convert GetRawTransactionResult to document
             "inscription": self.inscription.to_document(),
             "send_tx": self.send_tx.clone().map(|tx| tx.to_document()), // Convert Option<GetRawTransactionResult> to document
+            "send_block_height": self.send_block_height,
+            "send_tx_height": self.send_tx_height,
             "from": self.from.to_string(),
             "to": self.to.clone().map(|addr| addr.to_string()), // Convert Option<Address> to string
             "is_valid": self.is_valid,

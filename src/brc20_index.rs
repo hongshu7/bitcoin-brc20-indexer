@@ -6,7 +6,7 @@ use self::{
     user_balance::UserBalanceEntryType,
     utils::{extract_and_process_witness_data, get_owner_of_vout, get_witness_data_from_raw_tx},
 };
-use bitcoin::Address;
+use bitcoin::{block, Address};
 use bitcoincore_rpc::bitcoincore_rpc_json::{
     GetRawTransactionResult, GetRawTransactionResultVin, GetRawTransactionResultVout,
     GetRawTransactionResultVoutScriptPubKey,
@@ -144,7 +144,7 @@ pub async fn index_brc20(
                                                     if inscription_found {
                                                         mint_documents.push(mint.to_document());
                                                         user_balance_entry_documents
-                                                            .push(user_balance_entry);
+                                                            .push(user_balance_entry.to_document());
                                                     }
                                                 }
                                                 Err(e) => {
@@ -174,7 +174,7 @@ pub async fn index_brc20(
                                                             .push(transfer.to_document());
 
                                                         user_balance_entry_documents
-                                                            .push(user_balance_entry);
+                                                            .push(user_balance_entry.to_document());
                                                     }
                                                 }
                                                 Err(e) => {
@@ -204,6 +204,7 @@ pub async fn index_brc20(
                                         &rpc,
                                         &raw_tx,
                                         current_block_height.into(),
+                                        tx_height.into(),
                                         active_transfers,
                                         &mut transfer_documents,
                                     )
@@ -303,6 +304,7 @@ pub async fn check_for_transfer_send(
     rpc: &Client,
     raw_tx_info: &GetRawTransactionResult,
     block_height: u64,
+    tx_height: i64,
     active_transfers: &mut HashMap<(String, i64), Brc20ActiveTransfer>,
     transfer_documents: &mut Vec<Document>, // added this parameter
 ) -> Result<(), anyhow::Error> {
@@ -420,6 +422,8 @@ pub async fn check_for_transfer_send(
             &txid,
             vout,
             &receiver_address,
+            block_height.try_into().unwrap(),
+            tx_height,
             &raw_tx_info,
             transfer_documents,
         )
@@ -547,11 +551,11 @@ pub async fn update_transfer_document(
     tx_id: &str,
     vout: i64,
     receiver_address: &Address,
+    send_block_height: i64,
+    send_tx_height: i64,
     send_tx: &GetRawTransactionResult,
     transfer_documents: &mut Vec<Document>,
 ) -> Result<(), anyhow::Error> {
-    let key = (tx_id.to_string(), vout);
-
     // Check if the transfer exists in the transfer_documents vector
     if let Some(transfer_doc) = transfer_documents.iter_mut().find(|doc| {
         doc.get_str("tx.txid").ok() == Some(tx_id) && doc.get_i64("tx.vout").ok() == Some(vout)
@@ -565,6 +569,8 @@ pub async fn update_transfer_document(
             "$set": {
                 "to": receiver_address.to_string(),
                 "send_tx": send_tx.to_document(),
+                "send_block_height": send_block_height,
+                "send_tx_height": send_tx_height,
             }
         };
 
