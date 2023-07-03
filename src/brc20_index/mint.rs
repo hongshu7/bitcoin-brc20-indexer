@@ -137,10 +137,6 @@ impl Brc20Mint {
             );
 
             invalid_brc20_docs.push(invalid_tx.to_document());
-
-            // mongo_client
-            //     .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
-            //     .await?;
         }
 
         Ok(self)

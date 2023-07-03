@@ -201,11 +201,6 @@ impl Brc20Transfer {
 
         invalid_brc20_docs.push(invalid_tx.to_document());
 
-        // Insert the invalid transaction into MongoDB
-        // mongo_client
-        //     .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
-        //     .await?;
-
         Ok(())
     }
 }

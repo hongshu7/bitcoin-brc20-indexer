@@ -234,7 +234,6 @@ pub async fn index_brc20(
                         }
 
                         // Bulk write transfers to mongodb
-                        println!("transfer_documents: {:?}", transfer_documents);
                         if !transfer_documents.is_empty() {
                             mongo_client
                                 .insert_many_with_retries(

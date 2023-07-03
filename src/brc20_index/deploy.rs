@@ -128,11 +128,6 @@ impl Brc20Deploy {
             );
 
             invalid_brc20_docs.push(invalid_tx.to_document());
-
-            // insert invalid deploy tx into mongodb
-            // mongo_client
-            //     .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
-            //     .await?;
         }
 
         Ok(valid_deploy_tx)
