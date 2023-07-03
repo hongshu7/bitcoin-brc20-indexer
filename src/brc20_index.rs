@@ -231,6 +231,7 @@ pub async fn index_brc20(
                         }
 
                         // Bulk write transfers to mongodb
+                        println!("transfer_documents: {:?}", transfer_documents);
                         if !transfer_documents.is_empty() {
                             mongo_client
                                 .insert_many_with_retries(
@@ -246,6 +247,16 @@ pub async fn index_brc20(
                                 .insert_many_with_retries(
                                     consts::COLLECTION_DEPLOYS,
                                     deploy_documents,
+                                )
+                                .await?;
+                        }
+
+                        // Bulk write user balance entries to mongodb
+                        if !user_balance_entry_documents.is_empty() {
+                            mongo_client
+                                .insert_many_with_retries(
+                                    consts::COLLECTION_USER_BALANCE_ENTRY,
+                                    user_balance_entry_documents,
                                 )
                                 .await?;
                         }
@@ -333,7 +344,7 @@ pub async fn check_for_transfer_send(
             Some(transfer_doc) => transfer_doc.clone(),
             None => {
                 // get mongo doc for transfers collection that matches the txid and vout
-                let filter_doc = doc! {"tx.txid": txid.to_string(), "tx.vout": vout };
+                let filter_doc = doc! {"tx.txid": txid.clone()};
                 match mongo_client
                     .get_document_by_filter(consts::COLLECTION_TRANSFERS, filter_doc)
                     .await?
@@ -444,6 +455,16 @@ pub async fn check_for_transfer_send(
         mongo_client
             .update_receiver_balance_document(&receiver_address.to_string(), amount, &tick)
             .await?;
+
+        info!(
+            "Transfer inscription found for txid: {}, vout: {}",
+            txid, vout
+        );
+        info!(
+            "Amount transferred: {}, to: {}",
+            amount,
+            receiver_address.to_string()
+        );
     }
 
     Ok(())
@@ -588,29 +609,3 @@ pub async fn update_transfer_document(
 
     Ok(())
 }
-
-// This function will update the transfer document in MongoDB with receiver and send_tx
-// pub async fn update_transfer_document(
-//     mongo_client: &MongoClient,
-//     tx_id: String,
-//     receiver_address: &Address,
-//     send_tx: &GetRawTransactionResult,
-// ) -> Result<(), anyhow::Error> {
-//     let update_doc = doc! {
-//         "$set": {
-//             "to": receiver_address.to_string(),
-//             "send_tx": send_tx.to_document(),
-//         }
-//     };
-
-//     // Update the document in MongoDB
-//     mongo_client
-//         .update_document_by_field(
-//             consts::COLLECTION_TRANSFERS,
-//             "tx.txid",
-//             &tx_id.to_string(),
-//             update_doc,
-//         )
-//         .await?;
-//     Ok(())
-// }
