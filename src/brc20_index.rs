@@ -198,6 +198,7 @@ pub async fn index_brc20(
                                         &raw_tx,
                                         current_block_height.into(),
                                         active_transfers,
+                                        &transfer_documents,
                                     )
                                     .await
                                     {
@@ -296,6 +297,7 @@ pub async fn check_for_transfer_send(
     raw_tx_info: &GetRawTransactionResult,
     block_height: u64,
     active_transfers: &mut HashMap<(String, i64), Brc20ActiveTransfer>,
+    transfer_documents: &[Document],
 ) -> Result<(), anyhow::Error> {
     let transaction = raw_tx_info.transaction()?;
 
@@ -311,20 +313,30 @@ pub async fn check_for_transfer_send(
             continue;
         }
 
-        // get mongo doc for transfers collection that matches the txid and vout
-        let filter_doc = doc! {"tx.txid": txid.to_string() };
-        let transfer_doc = match mongo_client
-            .get_document_by_filter(consts::COLLECTION_TRANSFERS, filter_doc)
-            .await?
-        {
-            Some(doc) => doc,
+        // Check if transfer exists in the transfer_documents vector
+        let transfer_doc_opt = transfer_documents.iter().find(|doc| {
+            doc.get_str("tx.txid").ok() == Some(&txid) && doc.get_i64("tx.vout").ok() == Some(vout)
+        });
+
+        let transfer_doc = match transfer_doc_opt {
+            Some(transfer_doc) => transfer_doc.clone(),
             None => {
-                log::error!(
-                    "Transfer inscription not found for txid: {}, vout: {}",
-                    txid,
-                    vout
-                );
-                continue;
+                // get mongo doc for transfers collection that matches the txid and vout
+                let filter_doc = doc! {"tx.txid": txid.to_string(), "tx.vout": vout };
+                match mongo_client
+                    .get_document_by_filter(consts::COLLECTION_TRANSFERS, filter_doc)
+                    .await?
+                {
+                    Some(doc) => doc,
+                    None => {
+                        log::error!(
+                            "Transfer inscription not found for txid: {}, vout: {}",
+                            txid,
+                            vout
+                        );
+                        continue;
+                    }
+                }
             }
         };
 
