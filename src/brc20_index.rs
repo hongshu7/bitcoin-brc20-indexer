@@ -6,7 +6,7 @@ use self::{
     user_balance::UserBalanceEntryType,
     utils::{extract_and_process_witness_data, get_owner_of_vout, get_witness_data_from_raw_tx},
 };
-use bitcoin::{block, Address};
+use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::{
     GetRawTransactionResult, GetRawTransactionResultVin, GetRawTransactionResultVout,
     GetRawTransactionResultVoutScriptPubKey,
@@ -207,6 +207,7 @@ pub async fn index_brc20(
                                         tx_height.into(),
                                         active_transfers,
                                         &mut transfer_documents,
+                                        &mut user_balance_entry_documents,
                                     )
                                     .await
                                     {
@@ -306,7 +307,8 @@ pub async fn check_for_transfer_send(
     block_height: u64,
     tx_height: i64,
     active_transfers: &mut HashMap<(String, i64), Brc20ActiveTransfer>,
-    transfer_documents: &mut Vec<Document>, // added this parameter
+    transfer_documents: &mut Vec<Document>,
+    user_balance_entry_documents: &mut Vec<Document>,
 ) -> Result<(), anyhow::Error> {
     let transaction = raw_tx_info.transaction()?;
 
@@ -393,8 +395,8 @@ pub async fn check_for_transfer_send(
 
         let receiver_address = get_owner_of_vout(&raw_tx_info, proper_vout)?;
 
-        // Update user overall balance and available for the from address(sender) in MongoDB
-        mongo_client
+        // Update user overall balance and available for the from address(sender)
+        let user_entry_from = mongo_client
             .insert_user_balance_entry(
                 &from,
                 amount,
@@ -404,8 +406,10 @@ pub async fn check_for_transfer_send(
             )
             .await?;
 
-        // Update user overall balance and available for the to address(receiver) in MongoDB
-        mongo_client
+        user_balance_entry_documents.push(user_entry_from.to_document());
+
+        // Update user overall balance and available for the to address(receiver)
+        let user_entry_to = mongo_client
             .insert_user_balance_entry(
                 &receiver_address.to_string(),
                 amount,
@@ -414,6 +418,8 @@ pub async fn check_for_transfer_send(
                 UserBalanceEntryType::Receive,
             )
             .await?;
+
+        user_balance_entry_documents.push(user_entry_to.to_document());
 
         //-------------MONGODB-------------------//
         // Update the transfer document in MongoDB (check in memory first)

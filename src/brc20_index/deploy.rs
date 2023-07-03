@@ -251,14 +251,6 @@ pub async fn handle_deploy_operation(
         mongo_client
             .insert_document(consts::COLLECTION_TICKERS, ticker.to_document())
             .await?;
-
-        // Insert the valid deploy transaction into MongoDB
-        // mongo_client
-        //     .insert_document(
-        //         consts::COLLECTION_DEPLOYS,
-        //         validated_deploy_tx.to_document(),
-        //     )
-        //     .await?;
     } else {
         error!(
             "Invalid deploy: {:?}",
