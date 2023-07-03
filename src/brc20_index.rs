@@ -253,6 +253,31 @@ pub async fn index_brc20(
                                 .await?;
                         }
 
+                        // convert tickers hashmap to vec<Document>
+                        let tickers: Vec<Document> =
+                            tickers.into_iter().map(|(_, ticker)| ticker).collect();
+
+                        // Bulk update tickers in mongodb
+                        if !tickers.is_empty() {
+                            for ticker in tickers {
+                                let filter_doc = doc! {
+                                    "tick": ticker.get_str("tick").unwrap_or_default(),
+                                };
+
+                                let update_doc = doc! {
+                                    "$set": ticker,
+                                };
+
+                                mongo_client
+                                    .update_many_with_retries(
+                                        consts::COLLECTION_TICKERS,
+                                        filter_doc,
+                                        update_doc,
+                                    )
+                                    .await?;
+                            }
+                        }
+
                         // Bulk write user balance entries to mongodb
                         if !user_balance_entry_documents.is_empty() {
                             mongo_client

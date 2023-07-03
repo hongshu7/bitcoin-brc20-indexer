@@ -128,7 +128,7 @@ impl Brc20Mint {
         if !self.is_valid {
             error!("INVALID: {}", reason);
 
-            // Insert the invalid mint inscription into MongoDB
+            // Insert the invalid mint inscription
             let invalid_tx = InvalidBrc20Tx::new(
                 self.tx.txid,
                 self.inscription.clone(),
@@ -193,9 +193,10 @@ async fn update_ticker_total_minted(
         tickers.insert(ticker_symbol.clone(), updated_ticker_doc);
 
         // Update the total minted amount in MongoDB
-        mongo_client
-            .update_brc20_ticker_total_minted(ticker_symbol, mint_amount)
-            .await?;
+        //TODO: write to mongo at the end of the block
+        // mongo_client
+        //     .update_brc20_ticker_total_minted(ticker_symbol, mint_amount)
+        //     .await?;
     }
 
     Ok(())
@@ -246,7 +247,7 @@ pub async fn update_balances_and_ticker(
         .await?;
     }
 
-    // Insert user balance entry into MongoDB
+    // Insert user balance entry
     Ok(mongo_client
         .insert_user_balance_entry(
             &validated_mint_tx.to.to_string(),

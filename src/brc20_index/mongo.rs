@@ -112,6 +112,41 @@ impl MongoClient {
         ))
     }
 
+    pub async fn update_many_with_retries(
+        &self,
+        collection_name: &str,
+        filter: Document,
+        update: Document,
+    ) -> anyhow::Result<()> {
+        let db = self.client.database(&self.db_name);
+        let collection = db.collection::<bson::Document>(collection_name);
+        let retries = consts::MONGO_RETRIES;
+
+        // Create UpdateOptions with upsert set to true
+        let update_options = UpdateOptions::builder().upsert(true).build();
+
+        for attempt in 0..=retries {
+            match collection
+                .update_many(filter.clone(), update.clone(), update_options.clone())
+                .await
+            {
+                Ok(_) => return Ok(()),
+                Err(e) => {
+                    println!(
+                        "Attempt {}/{} failed with error: {}. Retrying...",
+                        attempt + 1,
+                        retries,
+                        e,
+                    );
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            }
+        }
+        Err(anyhow::anyhow!(
+            "Failed to update document after all retries"
+        ))
+    }
+
     pub async fn find_one_with_retries(
         &self,
         collection_name: &str,
@@ -273,13 +308,6 @@ impl MongoClient {
             amount,
             entry_type,
         ))
-
-        // // Insert the new document into the MongoDB collection
-        // self.insert_document(
-        //     consts::COLLECTION_USER_BALANCE_ENTRY,
-        //     user_balance_entry.to_document(),
-        // )
-        // .await?;
     }
 
     // Method to update the balance document for a receiver in MongoDB
