@@ -191,12 +191,6 @@ async fn update_ticker_total_minted(
 
         // Replace the old ticker_doc in the hashmap with the updated one
         tickers.insert(ticker_symbol.clone(), updated_ticker_doc);
-
-        // Update the total minted amount in MongoDB
-        //TODO: write to mongo at the end of the block
-        // mongo_client
-        //     .update_brc20_ticker_total_minted(ticker_symbol, mint_amount)
-        //     .await?;
     }
 
     Ok(())

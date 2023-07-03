@@ -423,29 +423,6 @@ impl MongoClient {
         Ok(())
     }
 
-    pub async fn update_brc20_ticker_total_minted(
-        &self,
-        ticker: &str,
-        amount_to_add: f64,
-    ) -> anyhow::Result<()> {
-        let update_options = UpdateOptions::builder().upsert(false).build();
-        let filter = doc! { "tick": ticker };
-        let update_doc = doc! {
-            "$inc": { "total_minted": amount_to_add }
-        };
-
-        // Update the document in the collection with retries
-        self.update_one_with_retries(
-            consts::COLLECTION_TICKERS,
-            filter,
-            update_doc,
-            Some(update_options),
-        )
-        .await?;
-
-        Ok(())
-    }
-
     pub async fn store_completed_block(&self, block_height: i64) -> anyhow::Result<()> {
         let document = doc! {
             consts::KEY_BLOCK_HEIGHT: block_height,
