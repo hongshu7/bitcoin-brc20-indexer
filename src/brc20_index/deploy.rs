@@ -72,6 +72,7 @@ impl Brc20Deploy {
     pub async fn validate_deploy_script(
         mut self,
         mongo_client: &MongoClient,
+        invalid_brc20_docs: &mut Vec<Document>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let ticker_symbol = self.inscription.tick.to_lowercase();
         let mut reasons = vec![];
@@ -126,10 +127,12 @@ impl Brc20Deploy {
                 valid_deploy_tx.block_height,
             );
 
+            invalid_brc20_docs.push(invalid_tx.to_document());
+
             // insert invalid deploy tx into mongodb
-            mongo_client
-                .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
-                .await?;
+            // mongo_client
+            //     .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
+            //     .await?;
         }
 
         Ok(valid_deploy_tx)
@@ -231,10 +234,11 @@ pub async fn handle_deploy_operation(
     owner: Address,
     block_height: u32,
     tx_height: u32,
+    invalid_brc20_docs: &mut Vec<Document>,
 ) -> Result<Brc20Deploy, Box<dyn std::error::Error>> {
     // if invalid vaiidate_deploy_script handles and adds invalid to mongodb
     let validated_deploy_tx = Brc20Deploy::new(raw_tx, inscription, block_height, tx_height, owner)
-        .validate_deploy_script(&mongo_client)
+        .validate_deploy_script(&mongo_client, invalid_brc20_docs)
         .await?;
 
     if validated_deploy_tx.is_valid() {

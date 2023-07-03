@@ -84,6 +84,7 @@ impl Brc20Transfer {
         &mut self,
         mongo_client: &MongoClient,
         active_transfers: &mut Option<HashMap<(String, i64), Brc20ActiveTransfer>>,
+        invalid_brc20_docs: &mut Vec<Document>,
     ) -> Result<UserBalanceEntry, Box<dyn std::error::Error>> {
         let ticker_symbol = &self.inscription.tick.to_lowercase();
         let mut user_balance_entry = UserBalanceEntry::default();
@@ -98,7 +99,7 @@ impl Brc20Transfer {
             let reason = "Ticker not found";
             error!("INVALID Transfer Inscribe: {}", reason);
 
-            self.insert_invalid_tx(reason, mongo_client).await?;
+            self.insert_invalid_tx(reason, invalid_brc20_docs).await?;
 
             return Err(Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
@@ -173,14 +174,14 @@ impl Brc20Transfer {
                 let reason = "Transfer amount exceeds available balance";
                 error!("INVALID: {}", reason);
 
-                self.insert_invalid_tx(reason, mongo_client).await?;
+                self.insert_invalid_tx(reason, invalid_brc20_docs).await?;
             }
         } else {
             // User balance not found, create invalid transaction
             let reason = "User balance not found";
             error!("INVALID: {}", reason);
 
-            self.insert_invalid_tx(reason, mongo_client).await?;
+            self.insert_invalid_tx(reason, invalid_brc20_docs).await?;
         }
 
         Ok(user_balance_entry)
@@ -189,7 +190,7 @@ impl Brc20Transfer {
     pub async fn insert_invalid_tx(
         &self,
         reason: &str,
-        mongo_client: &MongoClient,
+        invalid_brc20_docs: &mut Vec<Document>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let invalid_tx = InvalidBrc20Tx::new(
             self.tx.txid,
@@ -198,10 +199,12 @@ impl Brc20Transfer {
             self.block_height,
         );
 
+        invalid_brc20_docs.push(invalid_tx.to_document());
+
         // Insert the invalid transaction into MongoDB
-        mongo_client
-            .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
-            .await?;
+        // mongo_client
+        //     .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
+        //     .await?;
 
         Ok(())
     }
@@ -215,6 +218,7 @@ pub async fn handle_transfer_operation(
     raw_tx: &GetRawTransactionResult,
     sender: Address,
     active_transfers: &mut Option<HashMap<(String, i64), Brc20ActiveTransfer>>,
+    invalid_brc20_docs: &mut Vec<Document>,
 ) -> Result<(Brc20Transfer, UserBalanceEntry), Box<dyn std::error::Error>> {
     // Create a new transfer transaction
     let mut validated_transfer_tx =
@@ -222,7 +226,7 @@ pub async fn handle_transfer_operation(
 
     // Handle the transfer inscription
     let user_balance_entry = validated_transfer_tx
-        .validate_inscribe_transfer(mongo_client, active_transfers)
+        .validate_inscribe_transfer(mongo_client, active_transfers, invalid_brc20_docs)
         .await?;
 
     if validated_transfer_tx.is_valid() {

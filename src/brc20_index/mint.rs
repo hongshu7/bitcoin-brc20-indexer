@@ -67,8 +67,8 @@ impl Brc20Mint {
 
     pub async fn validate_mint<'a>(
         mut self,
-        mongo_client: &MongoClient,
         ticker_doc_opt: Option<&Document>,
+        invalid_brc20_docs: &mut Vec<Document>,
     ) -> Result<Brc20Mint, Box<dyn std::error::Error>> {
         let mut reason = String::new();
 
@@ -136,9 +136,11 @@ impl Brc20Mint {
                 self.block_height,
             );
 
-            mongo_client
-                .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
-                .await?;
+            invalid_brc20_docs.push(invalid_tx.to_document());
+
+            // mongo_client
+            //     .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
+            //     .await?;
         }
 
         Ok(self)
@@ -211,13 +213,16 @@ pub async fn pre_validate_mint(
     inscription: Brc20Inscription,
     raw_tx: &GetRawTransactionResult,
     tickers: &mut HashMap<String, Document>,
+    invalid_brc20_docs: &mut Vec<Document>,
 ) -> Result<Brc20Mint, Box<dyn std::error::Error>> {
     // Try to get the ticker from the hashmap if not, then mongodb
     let ticker_doc_opt = get_ticker(tickers, &inscription.tick.to_lowercase(), mongo_client).await;
 
     // Create a new Brc20Mint instance
     let new_mint = Brc20Mint::new(&raw_tx, inscription, block_height, tx_height, owner);
-    new_mint.validate_mint(mongo_client, ticker_doc_opt).await
+    new_mint
+        .validate_mint(ticker_doc_opt, invalid_brc20_docs)
+        .await
 }
 
 pub async fn update_balances_and_ticker(
@@ -265,6 +270,7 @@ pub async fn handle_mint_operation(
     inscription: Brc20Inscription,
     raw_tx: &GetRawTransactionResult,
     tickers: &mut HashMap<String, Document>,
+    invalid_brc20_docs: &mut Vec<Document>,
 ) -> Result<(Brc20Mint, UserBalanceEntry), Box<dyn std::error::Error>> {
     // Note: pre_validate_mint now also takes a reference to the tickers hashmap
     let validated_mint_tx = pre_validate_mint(
@@ -275,6 +281,7 @@ pub async fn handle_mint_operation(
         inscription,
         raw_tx,
         tickers,
+        invalid_brc20_docs,
     )
     .await?;
 

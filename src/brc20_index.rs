@@ -57,7 +57,7 @@ pub async fn index_brc20(
                         let mut mint_documents = Vec::new();
                         let mut transfer_documents = Vec::new();
                         let mut deploy_documents = Vec::new();
-                        // let mut invalid_brc20_documents = Vec::new();
+                        let mut invalid_brc20_documents = Vec::new();
                         let mut user_balance_entry_documents = Vec::new();
                         // Initialize a new hashmap for the tickers in this block
                         let mut tickers: HashMap<String, Document> = HashMap::new();
@@ -110,6 +110,7 @@ pub async fn index_brc20(
                                                 owner,
                                                 current_block_height,
                                                 tx_height,
+                                                &mut invalid_brc20_documents,
                                             )
                                             .await
                                             {
@@ -136,6 +137,7 @@ pub async fn index_brc20(
                                                 inscription,
                                                 &raw_tx,
                                                 &mut tickers,
+                                                &mut invalid_brc20_documents,
                                             )
                                             .await
                                             {
@@ -164,6 +166,7 @@ pub async fn index_brc20(
                                                 &raw_tx,
                                                 owner,
                                                 &mut active_transfers_opt,
+                                                &mut invalid_brc20_documents,
                                             )
                                             .await
                                             {
@@ -257,6 +260,16 @@ pub async fn index_brc20(
                                 .insert_many_with_retries(
                                     consts::COLLECTION_USER_BALANCE_ENTRY,
                                     user_balance_entry_documents,
+                                )
+                                .await?;
+                        }
+
+                        // Bulk write invalid brc20 documents to mongodb
+                        if !invalid_brc20_documents.is_empty() {
+                            mongo_client
+                                .insert_many_with_retries(
+                                    consts::COLLECTION_INVALIDS,
+                                    invalid_brc20_documents,
                                 )
                                 .await?;
                         }
