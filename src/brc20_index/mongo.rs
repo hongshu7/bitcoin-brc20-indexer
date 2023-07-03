@@ -265,24 +265,22 @@ impl MongoClient {
         tick: &str,
         block_height: u64,
         entry_type: UserBalanceEntryType,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<UserBalanceEntry, anyhow::Error> {
         // instantiate a new user balance entry
-        let user_balance_entry = UserBalanceEntry::new(
+        Ok(UserBalanceEntry::new(
             address.to_string(),
             tick.to_string(),
             block_height,
             amount,
             entry_type,
-        );
+        ))
 
-        // Insert the new document into the MongoDB collection
-        self.insert_document(
-            consts::COLLECTION_USER_BALANCE_ENTRY,
-            user_balance_entry.to_document(),
-        )
-        .await?;
-
-        Ok(())
+        // // Insert the new document into the MongoDB collection
+        // self.insert_document(
+        //     consts::COLLECTION_USER_BALANCE_ENTRY,
+        //     user_balance_entry.to_document(),
+        // )
+        // .await?;
     }
 
     // Method to update the balance document for a receiver in MongoDB

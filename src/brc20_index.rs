@@ -57,6 +57,8 @@ pub async fn index_brc20(
                         let mut mint_documents = Vec::new();
                         let mut transfer_documents = Vec::new();
                         let mut deploy_documents = Vec::new();
+                        // let mut invalid_brc20_documents = Vec::new();
+                        let mut user_balance_entry_documents = Vec::new();
                         // Initialize a new hashmap for the tickers in this block
                         let mut tickers: HashMap<String, Document> = HashMap::new();
 
@@ -137,10 +139,12 @@ pub async fn index_brc20(
                                             )
                                             .await
                                             {
-                                                Ok(mint) => {
+                                                Ok((mint, user_balance_entry)) => {
                                                     inscription_found = mint.is_valid();
                                                     if inscription_found {
                                                         mint_documents.push(mint.to_document());
+                                                        user_balance_entry_documents
+                                                            .push(user_balance_entry);
                                                     }
                                                 }
                                                 Err(e) => {
@@ -163,11 +167,14 @@ pub async fn index_brc20(
                                             )
                                             .await
                                             {
-                                                Ok(transfer) => {
+                                                Ok((transfer, user_balance_entry)) => {
                                                     inscription_found = transfer.is_valid();
                                                     if inscription_found {
                                                         transfer_documents
                                                             .push(transfer.to_document());
+
+                                                        user_balance_entry_documents
+                                                            .push(user_balance_entry);
                                                     }
                                                 }
                                                 Err(e) => {
@@ -198,7 +205,7 @@ pub async fn index_brc20(
                                         &raw_tx,
                                         current_block_height.into(),
                                         active_transfers,
-                                        &transfer_documents,
+                                        &mut transfer_documents,
                                     )
                                     .await
                                     {
@@ -297,7 +304,7 @@ pub async fn check_for_transfer_send(
     raw_tx_info: &GetRawTransactionResult,
     block_height: u64,
     active_transfers: &mut HashMap<(String, i64), Brc20ActiveTransfer>,
-    transfer_documents: &[Document],
+    transfer_documents: &mut Vec<Document>, // added this parameter
 ) -> Result<(), anyhow::Error> {
     let transaction = raw_tx_info.transaction()?;
 
@@ -407,8 +414,16 @@ pub async fn check_for_transfer_send(
             .await?;
 
         //-------------MONGODB-------------------//
-        // Update the transfer document in MongoDB
-        update_transfer_document(mongo_client, txid, &receiver_address, &raw_tx_info).await?;
+        // Update the transfer document in MongoDB (check in memory first)
+        update_transfer_document(
+            mongo_client,
+            &txid,
+            vout,
+            &receiver_address,
+            &raw_tx_info,
+            transfer_documents,
+        )
+        .await?;
 
         // Update user available and transferable balance for the sender in MongoDB
         mongo_client
@@ -527,28 +542,63 @@ impl ToDocument for GetRawTransactionResultVout {
     }
 }
 
-// This function will update the transfer document in MongoDB with receiver and send_tx
 pub async fn update_transfer_document(
     mongo_client: &MongoClient,
-    tx_id: String,
+    tx_id: &str,
+    vout: i64,
     receiver_address: &Address,
     send_tx: &GetRawTransactionResult,
+    transfer_documents: &mut Vec<Document>,
 ) -> Result<(), anyhow::Error> {
-    let update_doc = doc! {
-        "$set": {
-            "to": receiver_address.to_string(),
-            "send_tx": send_tx.to_document(),
-        }
-    };
+    let key = (tx_id.to_string(), vout);
 
-    // Update the document in MongoDB
-    mongo_client
-        .update_document_by_field(
-            consts::COLLECTION_TRANSFERS,
-            "tx.txid",
-            &tx_id.to_string(),
-            update_doc,
-        )
-        .await?;
+    // Check if the transfer exists in the transfer_documents vector
+    if let Some(transfer_doc) = transfer_documents.iter_mut().find(|doc| {
+        doc.get_str("tx.txid").ok() == Some(tx_id) && doc.get_i64("tx.vout").ok() == Some(vout)
+    }) {
+        // If it does, update it
+        transfer_doc.insert("to", receiver_address.to_string());
+        transfer_doc.insert("send_tx", send_tx.to_document());
+    } else {
+        // If it doesn't exist in the transfer_documents vector, update it in MongoDB
+        let update_doc = doc! {
+            "$set": {
+                "to": receiver_address.to_string(),
+                "send_tx": send_tx.to_document(),
+            }
+        };
+
+        // Update the document in MongoDB
+        mongo_client
+            .update_document_by_field(consts::COLLECTION_TRANSFERS, "tx.txid", tx_id, update_doc)
+            .await?;
+    }
+
     Ok(())
 }
+
+// This function will update the transfer document in MongoDB with receiver and send_tx
+// pub async fn update_transfer_document(
+//     mongo_client: &MongoClient,
+//     tx_id: String,
+//     receiver_address: &Address,
+//     send_tx: &GetRawTransactionResult,
+// ) -> Result<(), anyhow::Error> {
+//     let update_doc = doc! {
+//         "$set": {
+//             "to": receiver_address.to_string(),
+//             "send_tx": send_tx.to_document(),
+//         }
+//     };
+
+//     // Update the document in MongoDB
+//     mongo_client
+//         .update_document_by_field(
+//             consts::COLLECTION_TRANSFERS,
+//             "tx.txid",
+//             &tx_id.to_string(),
+//             update_doc,
+//         )
+//         .await?;
+//     Ok(())
+// }

@@ -46,6 +46,18 @@ pub struct UserBalanceEntry {
     pub entry_type: String,
 }
 
+impl Default for UserBalanceEntry {
+    fn default() -> Self {
+        Self {
+            address: String::default(),
+            tick: String::default(),
+            block_height: 0,
+            amt: 0.0,
+            entry_type: String::default(),
+        }
+    }
+}
+
 impl UserBalanceEntry {
     pub fn new(
         address: String,

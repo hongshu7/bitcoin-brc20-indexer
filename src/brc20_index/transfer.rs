@@ -1,4 +1,7 @@
-use super::{consts, invalid_brc20::InvalidBrc20Tx, mongo::MongoClient, Brc20Inscription};
+use super::{
+    consts, invalid_brc20::InvalidBrc20Tx, mongo::MongoClient, user_balance::UserBalanceEntry,
+    Brc20Inscription,
+};
 use crate::brc20_index::{user_balance::UserBalanceEntryType, ToDocument};
 use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
@@ -77,8 +80,9 @@ impl Brc20Transfer {
         &mut self,
         mongo_client: &MongoClient,
         active_transfers: &mut Option<HashMap<(String, i64), Brc20ActiveTransfer>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<UserBalanceEntry, Box<dyn std::error::Error>> {
         let ticker_symbol = &self.inscription.tick.to_lowercase();
+        let mut user_balance_entry = UserBalanceEntry::default();
 
         // get ticker doc from mongo
         let ticker_doc_from_mongo = mongo_client
@@ -127,7 +131,7 @@ impl Brc20Transfer {
                 self.is_valid = true;
 
                 // insert user balance entry
-                mongo_client
+                user_balance_entry = mongo_client
                     .insert_user_balance_entry(
                         &self.from.to_string(),
                         transfer_amount,
@@ -175,7 +179,7 @@ impl Brc20Transfer {
             self.insert_invalid_tx(reason, mongo_client).await?;
         }
 
-        Ok(())
+        Ok(user_balance_entry)
     }
 
     pub async fn insert_invalid_tx(
@@ -207,13 +211,13 @@ pub async fn handle_transfer_operation(
     raw_tx: &GetRawTransactionResult,
     sender: Address,
     active_transfers: &mut Option<HashMap<(String, i64), Brc20ActiveTransfer>>,
-) -> Result<Brc20Transfer, Box<dyn std::error::Error>> {
+) -> Result<(Brc20Transfer, UserBalanceEntry), Box<dyn std::error::Error>> {
     // Create a new transfer transaction
     let mut validated_transfer_tx =
         Brc20Transfer::new(raw_tx, inscription, block_height, tx_height, sender);
 
     // Handle the transfer inscription
-    let _ = validated_transfer_tx
+    let user_balance_entry = validated_transfer_tx
         .validate_inscribe_transfer(mongo_client, active_transfers)
         .await?;
 
@@ -224,7 +228,7 @@ pub async fn handle_transfer_operation(
         );
     }
 
-    Ok(validated_transfer_tx)
+    Ok((validated_transfer_tx, user_balance_entry))
 }
 
 impl ToDocument for Brc20Transfer {

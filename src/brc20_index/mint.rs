@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use crate::brc20_index::user_balance::UserBalanceEntryType;
 
 use super::{
-    consts, invalid_brc20::InvalidBrc20Tx, mongo::MongoClient, utils::convert_to_float,
-    Brc20Inscription, ToDocument,
+    consts, invalid_brc20::InvalidBrc20Tx, mongo::MongoClient, user_balance::UserBalanceEntry,
+    utils::convert_to_float, Brc20Inscription, ToDocument,
 };
 use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
@@ -224,19 +224,8 @@ pub async fn update_balances_and_ticker(
     mongo_client: &MongoClient,
     validated_mint_tx: &Brc20Mint,
     tickers: &mut HashMap<String, Document>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<UserBalanceEntry, Box<dyn std::error::Error>> {
     if validated_mint_tx.is_valid() {
-        // Insert user balance entry into MongoDB
-        mongo_client
-            .insert_user_balance_entry(
-                &validated_mint_tx.to.to_string(),
-                validated_mint_tx.amt,
-                &validated_mint_tx.inscription.tick.to_lowercase(),
-                validated_mint_tx.block_height.into(),
-                UserBalanceEntryType::Receive,
-            )
-            .await?;
-
         // Update user overall balance and available for the receiver in MongoDB
         mongo_client
             .update_receiver_balance_document(
@@ -256,7 +245,16 @@ pub async fn update_balances_and_ticker(
         .await?;
     }
 
-    Ok(())
+    // Insert user balance entry into MongoDB
+    Ok(mongo_client
+        .insert_user_balance_entry(
+            &validated_mint_tx.to.to_string(),
+            validated_mint_tx.amt,
+            &validated_mint_tx.inscription.tick.to_lowercase(),
+            validated_mint_tx.block_height.into(),
+            UserBalanceEntryType::Receive,
+        )
+        .await?)
 }
 
 pub async fn handle_mint_operation(
@@ -267,7 +265,7 @@ pub async fn handle_mint_operation(
     inscription: Brc20Inscription,
     raw_tx: &GetRawTransactionResult,
     tickers: &mut HashMap<String, Document>,
-) -> Result<Brc20Mint, Box<dyn std::error::Error>> {
+) -> Result<(Brc20Mint, UserBalanceEntry), Box<dyn std::error::Error>> {
     // Note: pre_validate_mint now also takes a reference to the tickers hashmap
     let validated_mint_tx = pre_validate_mint(
         mongo_client,
@@ -280,6 +278,8 @@ pub async fn handle_mint_operation(
     )
     .await?;
 
+    let mut user_balance_entry = UserBalanceEntry::default();
+
     // Check if the mint operation is valid.
     if validated_mint_tx.is_valid() {
         info!(
@@ -289,8 +289,9 @@ pub async fn handle_mint_operation(
         info!("TO Address: {:?}", validated_mint_tx.to);
 
         // update_balances_and_ticker now also takes a reference to the tickers hashmap
-        update_balances_and_ticker(mongo_client, &validated_mint_tx, tickers).await?;
+        user_balance_entry =
+            update_balances_and_ticker(mongo_client, &validated_mint_tx, tickers).await?;
     }
 
-    Ok(validated_mint_tx)
+    Ok((validated_mint_tx, user_balance_entry))
 }
