@@ -1,11 +1,14 @@
-use super::{consts, invalid_brc20::InvalidBrc20Tx, mongo::MongoClient, Brc20Inscription};
+use super::{
+    consts, invalid_brc20::InvalidBrc20Tx, mongo::MongoClient, user_balance::UserBalanceEntry,
+    Brc20Inscription,
+};
 use crate::brc20_index::{user_balance::UserBalanceEntryType, ToDocument};
 use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use log::{error, info};
 use mongodb::bson::{doc, Bson, DateTime, Document};
 use serde::Serialize;
-use std::{collections::HashMap, fmt};
+use std::collections::HashMap;
 
 // create active transfer struct
 #[derive(Debug, Serialize)]
@@ -33,6 +36,8 @@ pub struct Brc20Transfer {
     pub tx: GetRawTransactionResult,
     pub inscription: Brc20Inscription,
     pub send_tx: Option<GetRawTransactionResult>,
+    pub send_block_height: Option<u32>,
+    pub send_tx_height: Option<u32>,
     pub from: Address,
     pub to: Option<Address>,
     pub is_valid: bool,
@@ -40,7 +45,7 @@ pub struct Brc20Transfer {
 
 impl Brc20Transfer {
     pub fn new(
-        inscription_tx: GetRawTransactionResult,
+        inscription_tx: &GetRawTransactionResult,
         inscription: Brc20Inscription,
         block_height: u32,
         tx_height: u32,
@@ -56,8 +61,10 @@ impl Brc20Transfer {
             amt,
             block_height,
             tx_height,
-            tx: inscription_tx,
+            tx: inscription_tx.clone(),
             send_tx: None,
+            send_block_height: None,
+            send_tx_height: None,
             inscription,
             from,
             to: None,
@@ -65,7 +72,6 @@ impl Brc20Transfer {
         }
     }
 
-    // getters and setters
     pub fn get_transfer_script(&self) -> &Brc20Inscription {
         &self.inscription
     }
@@ -78,9 +84,10 @@ impl Brc20Transfer {
         &mut self,
         mongo_client: &MongoClient,
         active_transfers: &mut Option<HashMap<(String, i64), Brc20ActiveTransfer>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let from = &self.from;
+        invalid_brc20_docs: &mut Vec<Document>,
+    ) -> Result<UserBalanceEntry, Box<dyn std::error::Error>> {
         let ticker_symbol = &self.inscription.tick.to_lowercase();
+        let mut user_balance_entry = UserBalanceEntry::default();
 
         // get ticker doc from mongo
         let ticker_doc_from_mongo = mongo_client
@@ -92,7 +99,7 @@ impl Brc20Transfer {
             let reason = "Ticker not found";
             error!("INVALID Transfer Inscribe: {}", reason);
 
-            self.insert_invalid_tx(reason, mongo_client).await?;
+            self.insert_invalid_tx(reason, invalid_brc20_docs).await?;
 
             return Err(Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
@@ -102,12 +109,12 @@ impl Brc20Transfer {
 
         // get the user balance from mongo
         let filter = doc! {
-          "address": from.to_string(),
-          "tick": self.inscription.tick.to_lowercase(),
+          "address": &self.from.to_string(),
+          "tick": ticker_symbol,
         };
 
         let user_balance_from = mongo_client
-            .get_user_balance_document(consts::COLLECTION_USER_BALANCES, filter.clone())
+            .get_document_by_filter(consts::COLLECTION_USER_BALANCES, filter.clone())
             .await?;
 
         if let Some(user_balance) = user_balance_from {
@@ -125,17 +132,15 @@ impl Brc20Transfer {
 
             // check if user has enough balance to transfer
             if available_balance >= transfer_amount {
-                println!("VALID: Transfer inscription added. From: {:#?}", from);
-
-                // if valid, add transfer inscription to user balance
+                println!("VALID: Transfer inscription added. From: {:#?}", self.from);
                 self.is_valid = true;
 
                 // insert user balance entry
-                mongo_client
+                user_balance_entry = mongo_client
                     .insert_user_balance_entry(
                         &self.from.to_string(),
                         transfer_amount,
-                        &self.inscription.tick.to_lowercase(),
+                        ticker_symbol,
                         self.block_height.into(),
                         UserBalanceEntryType::Inscription,
                     )
@@ -144,10 +149,9 @@ impl Brc20Transfer {
                 // Update the user balance document in MongoDB
                 mongo_client
                     .update_transfer_inscriber_user_balance_document(
-                        &from.to_string(),
+                        &self.from.to_string(),
                         transfer_amount,
                         ticker_symbol,
-                        user_balance,
                     )
                     .await?;
 
@@ -170,23 +174,23 @@ impl Brc20Transfer {
                 let reason = "Transfer amount exceeds available balance";
                 error!("INVALID: {}", reason);
 
-                self.insert_invalid_tx(reason, mongo_client).await?;
+                self.insert_invalid_tx(reason, invalid_brc20_docs).await?;
             }
         } else {
             // User balance not found, create invalid transaction
             let reason = "User balance not found";
             error!("INVALID: {}", reason);
 
-            self.insert_invalid_tx(reason, mongo_client).await?;
+            self.insert_invalid_tx(reason, invalid_brc20_docs).await?;
         }
 
-        Ok(())
+        Ok(user_balance_entry)
     }
 
     pub async fn insert_invalid_tx(
         &self,
         reason: &str,
-        mongo_client: &MongoClient,
+        invalid_brc20_docs: &mut Vec<Document>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let invalid_tx = InvalidBrc20Tx::new(
             self.tx.txid,
@@ -195,26 +199,8 @@ impl Brc20Transfer {
             self.block_height,
         );
 
-        // Insert the invalid transaction into MongoDB
-        mongo_client
-            .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
-            .await?;
+        invalid_brc20_docs.push(invalid_tx.to_document());
 
-        Ok(())
-    }
-}
-
-impl fmt::Display for Brc20Transfer {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Inscription TransactionId: {}", self.tx.txid)?;
-        writeln!(f, "Transfer Transaction: {:?}", self.send_tx)?;
-        writeln!(f, "Transfer Script: {:#?}", self.inscription)?;
-        writeln!(f, "Block Height: {}", self.block_height)?;
-        writeln!(f, "Transaction Height: {}", self.tx_height)?;
-        writeln!(f, "From: {:?}", self.from)?;
-        writeln!(f, "Amount: {}", self.amt)?;
-        writeln!(f, "Receiver: {:?}", self.to)?;
-        writeln!(f, "Is Valid: {}", self.is_valid)?;
         Ok(())
     }
 }
@@ -224,38 +210,28 @@ pub async fn handle_transfer_operation(
     block_height: u32,
     tx_height: u32,
     inscription: Brc20Inscription,
-    raw_tx: GetRawTransactionResult,
+    raw_tx: &GetRawTransactionResult,
     sender: Address,
     active_transfers: &mut Option<HashMap<(String, i64), Brc20ActiveTransfer>>,
-) -> Result<(), Box<dyn std::error::Error>> {
+    invalid_brc20_docs: &mut Vec<Document>,
+) -> Result<(Brc20Transfer, UserBalanceEntry), Box<dyn std::error::Error>> {
     // Create a new transfer transaction
     let mut validated_transfer_tx =
         Brc20Transfer::new(raw_tx, inscription, block_height, tx_height, sender);
 
     // Handle the transfer inscription
-    let _ = validated_transfer_tx
-        .validate_inscribe_transfer(mongo_client, active_transfers)
+    let user_balance_entry = validated_transfer_tx
+        .validate_inscribe_transfer(mongo_client, active_transfers, invalid_brc20_docs)
         .await?;
-
-    let from_address = validated_transfer_tx.from.clone();
 
     if validated_transfer_tx.is_valid() {
         info!(
             "Transfer: {:?}",
             validated_transfer_tx.get_transfer_script()
         );
-        info!("From Address: {:?}", &from_address);
-
-        // Add the valid transfer to the mongo database
-        mongo_client
-            .insert_document(
-                consts::COLLECTION_TRANSFERS,
-                validated_transfer_tx.to_document(),
-            )
-            .await?;
     }
 
-    Ok(())
+    Ok((validated_transfer_tx, user_balance_entry))
 }
 
 impl ToDocument for Brc20Transfer {
@@ -267,6 +243,8 @@ impl ToDocument for Brc20Transfer {
             "tx": self.tx.to_document(), // Convert GetRawTransactionResult to document
             "inscription": self.inscription.to_document(),
             "send_tx": self.send_tx.clone().map(|tx| tx.to_document()), // Convert Option<GetRawTransactionResult> to document
+            "send_block_height": self.send_block_height,
+            "send_tx_height": self.send_tx_height,
             "from": self.from.to_string(),
             "to": self.to.clone().map(|addr| addr.to_string()), // Convert Option<Address> to string
             "is_valid": self.is_valid,

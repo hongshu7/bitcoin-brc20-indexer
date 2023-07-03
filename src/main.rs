@@ -1,7 +1,5 @@
-extern crate bitcoincore_rpc;
-extern crate serde_json;
-use std::env;
-
+use crate::brc20_index::{consts, mongo::MongoClient};
+use bitcoincore_rpc;
 use bitcoincore_rpc::{Auth, Client};
 use brc20_index::index_brc20;
 use consulrs::{
@@ -9,101 +7,133 @@ use consulrs::{
     kv,
 };
 use dotenv::dotenv;
-use log::info;
+use log::{error, info};
+use serde_json;
 use serde_json::Value;
-
-use crate::brc20_index::{consts, mongo::MongoClient};
+use std::env;
 
 mod brc20_index;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize logger and load env variables
     dotenv().ok();
     env_logger::init();
-    let consul_host = env::var("CONSUL_HOST").unwrap();
-    let client = ConsulClient::new(
-        ConsulClientSettingsBuilder::default()
-            .address(consul_host)
-            .build()
-            .unwrap(),
-    )
-    .unwrap();
-    let mut res = kv::read(&client, "omnisat-api", None).await.unwrap();
-    let mykey: String = res
-        .response
-        .pop()
-        .unwrap()
-        .value
-        .unwrap()
-        .try_into()
+
+    // Variables for configuration
+    let rpc_url: String;
+    let rpc_user: String;
+    let rpc_password: String;
+    let mongo_connection_str: String;
+    let mut mongo_direct_connection_str: String;
+    let mongo_direct_connection;
+
+    // Check for CONSUL_HOST environment variable
+    if let Ok(consul_host) = env::var("CONSUL_HOST") {
+        let client = ConsulClient::new(
+            ConsulClientSettingsBuilder::default()
+                .address(consul_host)
+                .build()
+                .unwrap(),
+        )
         .unwrap();
-    let json_value: Value = serde_json::from_str(&mykey).unwrap();
+        let mut res = kv::read(&client, "omnisat-api", None).await.unwrap();
+        let mykey: String = res
+            .response
+            .pop()
+            .unwrap()
+            .value
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let json_value: Value = serde_json::from_str(&mykey).unwrap();
 
-    let mut rpc_url = json_value
-        .get("btc_rpc_host")
-        .unwrap()
-        .as_str()
-        .unwrap_or_else(|| panic!("BTC_RPC_HOST IS NOT SET"));
+        rpc_url = json_value
+            .get("btc_rpc_host")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_string();
 
-    let mut rpc_user = json_value
-        .get("btc_rpc_user")
-        .unwrap()
-        .as_str()
-        .unwrap_or_else(|| panic!("BTC_RPC_USER IS NOT SET"));
+        rpc_user = json_value
+            .get("btc_rpc_user")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_string();
 
-    let mut rpc_password = json_value
-        .get("btc_rpc_pass")
-        .unwrap()
-        .as_str()
-        .unwrap_or_else(|| panic!("BTC_RPC_PASSWORD IS NOT SET"));
+        rpc_password = json_value
+            .get("btc_rpc_pass")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_string();
 
-    let rpc_url_env = env::var("RPC_URL").unwrap();
-    let rpc_user_env = env::var("RPC_USER").unwrap();
-    let rpc_password_env = env::var("RPC_PASSWORD").unwrap();
+        mongo_direct_connection_str = json_value
+            .get("mongo_direct_connection")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_string();
 
-    match env::var("ENV").unwrap().as_ref() {
-        "workstation" => {
-            rpc_url = rpc_url_env.as_str();
-            rpc_user = rpc_user_env.as_str();
-            rpc_password = rpc_password_env.as_str();
+        // mongo_direct_connection = mongo_direct_connection_str.to_lowercase() == "true";
+        // let mongo_direct_connection_str_env = env::var("MONGO_DIRECT_CONNECTION").ok();
+        if let Ok(mongo_direct_connection_str_env) = env::var("MONGO_DIRECT_CONNECTION") {
+            mongo_direct_connection_str = mongo_direct_connection_str_env;
         }
-        &_ => (),
-    };
+
+        mongo_direct_connection = mongo_direct_connection_str.to_lowercase() == "true";
+        //MongoDB connection string
+        let mongo_host_consul = json_value.get("mongo_rc").unwrap().as_array().unwrap();
+        let mongo_host_env = env::var("MONGO_DB_HOST").ok();
+
+        mongo_connection_str = if let Some(mongo_host_env) = mongo_host_env {
+            format!("mongodb://{}:27017", mongo_host_env)
+        } else {
+            format!(
+                "mongodb://{}:27017,{}:27017,{}:27017/omnisat?replicaSet=rs0",
+                mongo_host_consul[0].as_str().unwrap(),
+                mongo_host_consul[1].as_str().unwrap(),
+                mongo_host_consul[2].as_str().unwrap(),
+            )
+        };
+
+        // mongo_connection_str = format!(
+        //     "mongodb://{}:27017,{}:27017,{}:27017/omnisat?replicaSet=rs0",
+        //     mongo_host_consul[0].as_str().unwrap(),
+        //     mongo_host_consul[1].as_str().unwrap(),
+        //     mongo_host_consul[2].as_str().unwrap(),
+        // );
+    } else {
+        mongo_direct_connection_str = env::var("MONGO_DIRECT_CONNECTION").unwrap();
+        mongo_direct_connection = mongo_direct_connection_str.to_lowercase() == "true";
+
+        // Pick up environment vars from .env file
+        rpc_url = env::var("RPC_URL").unwrap();
+        rpc_user = env::var("RPC_USER").unwrap();
+        rpc_password = env::var("RPC_PASSWORD").unwrap();
+
+        let mongo_user = env::var("MONGO_USER").ok();
+        let mongo_password = env::var("MONGO_PASSWORD").ok();
+        let mongo_db_host = env::var("MONGO_DB_HOST").unwrap();
+
+        mongo_connection_str = if let (Some(user), Some(password)) = (mongo_user, mongo_password) {
+            format!("mongodb://{}:{}@{}:27017", user, password, mongo_db_host)
+        } else {
+            format!("mongodb://{}:27017", mongo_db_host)
+        };
+    }
 
     // Connect to Bitcoin Core RPC server
-    let rpc = Client::new(
-        &rpc_url,
-        Auth::UserPass(rpc_user.to_string(), rpc_password.to_string()),
-    )?;
+    let rpc = Client::new(&rpc_url, Auth::UserPass(rpc_user, rpc_password))?;
     info!("Connected to Bitcoin Core");
 
-    //MongoDB connection
-    //TODO: This is connecting to Consul to get the MONGO_HOST, this should be refactorered to get ALL
-    // the variables we need from consul in one place in the codebase and set CONSTANT variables for these.
-
-    let mongo_host = json_value
-        .get("mongo_rc")
-        .unwrap_or_else(|| panic!("MONGO_RC IS NOT SET"));
-
-    let mongo_connection_str = format!(
-        "mongodb://{}:27017,{}:27017,{}:27017/omnisat?replicaSet=rs0",
-        mongo_host[0].as_str().unwrap(),
-        mongo_host[1].as_str().unwrap(),
-        mongo_host[2].as_str().unwrap(),
-    );
-
-    // Get the mongo host from environment variable if on local workstation
-    let mongo_db_host = env::var("MONGO_DB_HOST");
-    let mongo_connection_str = match mongo_db_host {
-        Ok(host) => format!("mongodb://{}:27017", host),
-        Err(_) => mongo_connection_str,
-    };
-
-    // let mongo_connection_str = "mongodb://localhost:27017"; // This uses localhost as mongo host
     // Get the mongo database name from environment variable
     let db_name = env::var("MONGO_DB_NAME").unwrap();
-    let mongo_client = MongoClient::new(&mongo_connection_str, &db_name).await?;
+    let mongo_client =
+        MongoClient::new(&mongo_connection_str, &db_name, mongo_direct_connection).await?;
+
+    // Call create_indexes after MongoClient has been initialized
+    mongo_client.create_indexes().await?;
 
     // get block height to start indexing from
     let mut start_block_height = consts::BRC20_STARTING_BLOCK_HEIGHT; // default starting point
@@ -129,6 +159,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             consts::COLLECTION_TICKERS,
             consts::COLLECTION_USER_BALANCE_ENTRY,
             consts::COLLECTION_BRC20_ACTIVE_TRANSFERS,
+            consts::COLLECTION_TOTAL_MINTED_AT_BLOCK_HEIGHT,
         ];
 
         for collection in collections {
@@ -142,32 +173,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .drop_collection(consts::COLLECTION_USER_BALANCES)
             .await?;
 
-        // reset total_minted for each ticker
-        // Reset all tickers total_minted to 0.0
-        match mongo_client.reset_tickers_total_minted().await {
-            Ok(_) => info!("Reset total_minted for all tickers"),
-            Err(e) => info!("Error resetting total_minted for all tickers: {:?}", e),
-        };
-
         //recalculate total_minted for each ticker
-        match mongo_client.calculate_and_update_total_minted().await {
-            Ok(_) => info!("Recalculated total_minted for all tickers"),
+        info!("Recalculating total_minted for all tickers...");
+        info!(
+            "Start block_height for update tickers: {}",
+            start_block_height - 1
+        );
+        match mongo_client
+            .update_ticker_totals(start_block_height - 1)
+            .await
+        {
+            Ok(_) => info!("Recalculation complete."),
             Err(e) => info!("Error recalculating total_minted for all tickers: {:?}", e),
         };
 
         // rebuild userbalances
+        info!("Recreating userbalances...");
         match mongo_client.rebuild_user_balances().await {
-            Ok(_) => info!("Recreated userbalances"),
+            Ok(_) => info!("Recreation complete."),
             Err(e) => info!("Error recreating userbalances: {:?}", e),
         };
     }
 
-    //TODO: Rebuild rust memory from db only
-
     // LFG!
     match index_brc20(&rpc, &mongo_client, start_block_height.try_into().unwrap()).await {
         Ok(_) => info!("Finished indexing BRC20 tokens"),
-        Err(e) => info!("Error indexing BRC20 tokens: {:?}", e),
+        Err(e) => error!("Error indexing BRC20 tokens: {:?}", e),
     };
 
     Ok(())

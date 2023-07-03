@@ -8,7 +8,6 @@ use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
 use log::{error, info};
 use mongodb::bson::{doc, Bson, DateTime, Document};
 use serde::Serialize;
-use std::fmt;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Brc20Deploy {
@@ -25,7 +24,7 @@ pub struct Brc20Deploy {
 
 impl Brc20Deploy {
     pub fn new(
-        tx: GetRawTransactionResult,
+        tx: &GetRawTransactionResult,
         inscription: Brc20Inscription,
         block_height: u32,
         tx_height: u32,
@@ -39,13 +38,12 @@ impl Brc20Deploy {
             block_height,
             tx_height,
             owner,
-            tx,
+            tx: tx.clone(),
             inscription,
             is_valid: false,
         }
     }
 
-    // getters and setters
     pub fn get_max_supply(&self) -> f64 {
         self.max
     }
@@ -71,13 +69,10 @@ impl Brc20Deploy {
         &self.inscription
     }
 
-    pub fn get_raw_tx(&self) -> &GetRawTransactionResult {
-        &self.tx
-    }
-
     pub async fn validate_deploy_script(
         mut self,
         mongo_client: &MongoClient,
+        invalid_brc20_docs: &mut Vec<Document>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let ticker_symbol = self.inscription.tick.to_lowercase();
         let mut reasons = vec![];
@@ -132,10 +127,7 @@ impl Brc20Deploy {
                 valid_deploy_tx.block_height,
             );
 
-            // insert invalid deploy tx into mongodb
-            mongo_client
-                .insert_document(consts::COLLECTION_INVALIDS, invalid_tx.to_document())
-                .await?;
+            invalid_brc20_docs.push(invalid_tx.to_document());
         }
 
         Ok(valid_deploy_tx)
@@ -233,14 +225,15 @@ impl ToDocument for Brc20Deploy {
 pub async fn handle_deploy_operation(
     mongo_client: &MongoClient,
     inscription: Brc20Inscription,
-    raw_tx: GetRawTransactionResult,
+    raw_tx: &GetRawTransactionResult,
     owner: Address,
     block_height: u32,
     tx_height: u32,
-) -> Result<(), Box<dyn std::error::Error>> {
+    invalid_brc20_docs: &mut Vec<Document>,
+) -> Result<Brc20Deploy, Box<dyn std::error::Error>> {
     // if invalid vaiidate_deploy_script handles and adds invalid to mongodb
     let validated_deploy_tx = Brc20Deploy::new(raw_tx, inscription, block_height, tx_height, owner)
-        .validate_deploy_script(&mongo_client)
+        .validate_deploy_script(&mongo_client, invalid_brc20_docs)
         .await?;
 
     if validated_deploy_tx.is_valid() {
@@ -257,14 +250,6 @@ pub async fn handle_deploy_operation(
         mongo_client
             .insert_document(consts::COLLECTION_TICKERS, ticker.to_document())
             .await?;
-
-        // Insert the valid deploy transaction into MongoDB
-        mongo_client
-            .insert_document(
-                consts::COLLECTION_DEPLOYS,
-                validated_deploy_tx.to_document(),
-            )
-            .await?;
     } else {
         error!(
             "Invalid deploy: {:?}",
@@ -272,7 +257,7 @@ pub async fn handle_deploy_operation(
         );
     }
 
-    Ok(())
+    Ok(validated_deploy_tx)
 }
 
 // A helper function to find out the decimal places of the given float
@@ -282,21 +267,5 @@ fn decimal_places(num: f64) -> u32 {
         s[pos + 1..].len() as u32
     } else {
         0
-    }
-}
-
-impl fmt::Display for Brc20Deploy {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Deploy TransactionId:")?;
-        writeln!(f, "{}", self.get_raw_tx().txid)?;
-        writeln!(f, "Deploy Script: {:#?}", self.inscription)?;
-        writeln!(f, "Is Valid: {}", self.is_valid)?;
-
-        // Additional information based on the fields of Brc20DeployTx
-        writeln!(f, "Max Supply: {}", self.max)?;
-        writeln!(f, "Limit: {}", self.lim)?;
-        writeln!(f, "Decimals: {}", self.dec)?;
-
-        Ok(())
     }
 }

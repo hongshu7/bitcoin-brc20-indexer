@@ -1,14 +1,12 @@
 use self::{
-    brc20_ticker::Brc20Ticker,
     deploy::handle_deploy_operation,
-    invalid_brc20::InvalidBrc20TxMap,
     mint::handle_mint_operation,
     mongo::MongoClient,
     transfer::{handle_transfer_operation, Brc20ActiveTransfer},
     user_balance::UserBalanceEntryType,
     utils::{extract_and_process_witness_data, get_owner_of_vout, get_witness_data_from_raw_tx},
 };
-use bitcoin::{Address, OutPoint};
+use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::{
     GetRawTransactionResult, GetRawTransactionResultVin, GetRawTransactionResultVout,
     GetRawTransactionResultVoutScriptPubKey,
@@ -26,8 +24,488 @@ mod invalid_brc20;
 mod mint;
 pub mod mongo;
 mod transfer;
-pub mod user_balance;
+mod user_balance;
 mod utils;
+
+pub async fn index_brc20(
+    rpc: &Client,
+    mongo_client: &MongoClient,
+    start_block_height: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut current_block_height = start_block_height;
+
+    loop {
+        match rpc.get_block_hash(current_block_height.into()) {
+            Ok(current_block_hash) => {
+                match rpc.get_block(&current_block_hash) {
+                    Ok(block) => {
+                        let length = block.txdata.len();
+                        info!(
+                            "Fetched block: {:?}, Transactions: {:?}, Block: {:?}",
+                            current_block_hash, length, current_block_height
+                        );
+
+                        let mut active_transfers_opt =
+                            mongo_client.load_active_transfers_with_retry().await?;
+
+                        // If active_transfers_opt is None, initialize it with a new HashMap
+                        if active_transfers_opt.is_none() {
+                            active_transfers_opt = Some(HashMap::new());
+                        }
+
+                        // Vectors for mongo bulk writes
+                        let mut mint_documents = Vec::new();
+                        let mut transfer_documents = Vec::new();
+                        let mut deploy_documents = Vec::new();
+                        let mut invalid_brc20_documents = Vec::new();
+                        let mut user_balance_entry_documents = Vec::new();
+                        // Initialize a new hashmap for the tickers in this block
+                        let mut tickers: HashMap<String, Document> = HashMap::new();
+
+                        let mut tx_height = 0u32;
+                        for transaction in block.txdata {
+                            let txid = transaction.txid();
+                            // Get Raw Transaction Info
+                            let raw_tx = match rpc.get_raw_transaction_info(&txid, None) {
+                                Ok(tx) => tx,
+                                Err(e) => {
+                                    error!("Failed to get raw transaction info: {:?}", e);
+                                    continue; // This will skip the current iteration of the loop
+                                }
+                            };
+
+                            // Get witness data from raw transaction
+                            let witness_data = match get_witness_data_from_raw_tx(&raw_tx) {
+                                Ok(data) => data,
+                                Err(e) => {
+                                    error!("Failed to get witness data: {:?}", e);
+                                    continue;
+                                }
+                            };
+
+                            let mut inscription_found = false;
+                            for witness in witness_data {
+                                if let Some(inscription) = extract_and_process_witness_data(witness)
+                                {
+                                    // log raw brc20 data
+                                    let pretty_json =
+                                        serde_json::to_string(&inscription).unwrap_or_default();
+                                    log::debug!("Raw Brc-20 data: {}", pretty_json);
+
+                                    // get owner address, inscription is first satoshi of first output
+                                    let owner = match get_owner_of_vout(&raw_tx, 0) {
+                                        Ok(owner) => owner,
+                                        Err(e) => {
+                                            error!("Failed to get owner: {:?}", e);
+                                            continue;
+                                        }
+                                    };
+
+                                    match &inscription.op[..] {
+                                        "deploy" => {
+                                            match handle_deploy_operation(
+                                                mongo_client,
+                                                inscription,
+                                                &raw_tx,
+                                                owner,
+                                                current_block_height,
+                                                tx_height,
+                                                &mut invalid_brc20_documents,
+                                            )
+                                            .await
+                                            {
+                                                Ok(deploy) => {
+                                                    inscription_found = deploy.is_valid();
+                                                    if inscription_found {
+                                                        deploy_documents.push(deploy.to_document());
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    error!(
+                                                        "Error handling deploy operation: {:?}",
+                                                        e
+                                                    );
+                                                }
+                                            };
+                                        }
+                                        "mint" => {
+                                            match handle_mint_operation(
+                                                mongo_client,
+                                                current_block_height,
+                                                tx_height,
+                                                owner,
+                                                inscription,
+                                                &raw_tx,
+                                                &mut tickers,
+                                                &mut invalid_brc20_documents,
+                                            )
+                                            .await
+                                            {
+                                                Ok((mint, user_balance_entry)) => {
+                                                    inscription_found = mint.is_valid();
+                                                    if inscription_found {
+                                                        mint_documents.push(mint.to_document());
+                                                        user_balance_entry_documents
+                                                            .push(user_balance_entry.to_document());
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    error!(
+                                                        "Error handling mint operation: {:?}",
+                                                        e
+                                                    );
+                                                }
+                                            };
+                                        }
+                                        "transfer" => {
+                                            match handle_transfer_operation(
+                                                mongo_client,
+                                                current_block_height,
+                                                tx_height,
+                                                inscription,
+                                                &raw_tx,
+                                                owner,
+                                                &mut active_transfers_opt,
+                                                &mut invalid_brc20_documents,
+                                            )
+                                            .await
+                                            {
+                                                Ok((transfer, user_balance_entry)) => {
+                                                    inscription_found = transfer.is_valid();
+                                                    if inscription_found {
+                                                        transfer_documents
+                                                            .push(transfer.to_document());
+
+                                                        user_balance_entry_documents
+                                                            .push(user_balance_entry.to_document());
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    error!(
+                                                        "Error handling transfer inscription: {:?}",
+                                                        e
+                                                    );
+                                                }
+                                            };
+                                        }
+                                        _ => {
+                                            // Unexpected operation
+                                            error!("Unexpected operation: {}", inscription.op);
+                                        }
+                                    }
+                                }
+                            }
+
+                            // if no inscription found, check for transfer send
+                            if !inscription_found {
+                                if active_transfers_opt.is_none() {
+                                    active_transfers_opt = Some(HashMap::new());
+                                }
+                                if let Some(ref mut active_transfers) = &mut active_transfers_opt {
+                                    match check_for_transfer_send(
+                                        mongo_client,
+                                        &rpc,
+                                        &raw_tx,
+                                        current_block_height.into(),
+                                        tx_height.into(),
+                                        active_transfers,
+                                        &mut transfer_documents,
+                                        &mut user_balance_entry_documents,
+                                    )
+                                    .await
+                                    {
+                                        Ok(_) => (),
+                                        Err(e) => {
+                                            error!("Error checking for transfer send: {:?}", e);
+                                        }
+                                    };
+                                }
+                            }
+
+                            // Increment the tx height
+                            tx_height += 1;
+                        }
+
+                        // Bulk write mints to mongodb
+                        if !mint_documents.is_empty() {
+                            mongo_client
+                                .insert_many_with_retries(consts::COLLECTION_MINTS, mint_documents)
+                                .await?;
+                        }
+
+                        // Bulk write transfers to mongodb
+                        if !transfer_documents.is_empty() {
+                            mongo_client
+                                .insert_many_with_retries(
+                                    consts::COLLECTION_TRANSFERS,
+                                    transfer_documents,
+                                )
+                                .await?;
+                        }
+
+                        // Bulk write deploys to mongodb
+                        if !deploy_documents.is_empty() {
+                            mongo_client
+                                .insert_many_with_retries(
+                                    consts::COLLECTION_DEPLOYS,
+                                    deploy_documents,
+                                )
+                                .await?;
+                        }
+
+                        // convert tickers hashmap to vec<Document>
+                        let tickers: Vec<Document> =
+                            tickers.into_iter().map(|(_, ticker)| ticker).collect();
+
+                        // Bulk update tickers in mongodb
+                        if !tickers.is_empty() {
+                            for ticker in tickers {
+                                let filter_doc = doc! {
+                                    "tick": ticker.get_str("tick").unwrap_or_default(),
+                                };
+
+                                let update_doc = doc! {
+                                    "$set": ticker,
+                                };
+
+                                mongo_client
+                                    .update_many_with_retries(
+                                        consts::COLLECTION_TICKERS,
+                                        filter_doc,
+                                        update_doc,
+                                    )
+                                    .await?;
+                            }
+                        }
+
+                        // Bulk write user balance entries to mongodb
+                        if !user_balance_entry_documents.is_empty() {
+                            mongo_client
+                                .insert_many_with_retries(
+                                    consts::COLLECTION_USER_BALANCE_ENTRY,
+                                    user_balance_entry_documents,
+                                )
+                                .await?;
+                        }
+
+                        // Bulk write invalid brc20 documents to mongodb
+                        if !invalid_brc20_documents.is_empty() {
+                            mongo_client
+                                .insert_many_with_retries(
+                                    consts::COLLECTION_INVALIDS,
+                                    invalid_brc20_documents,
+                                )
+                                .await?;
+                        }
+
+                        // drop mongodb collection right before inserting active transfers
+                        mongo_client
+                            .drop_collection(consts::COLLECTION_BRC20_ACTIVE_TRANSFERS)
+                            .await?;
+
+                        // store active transfer collection, if any
+                        if let Some(active_transfers) = active_transfers_opt {
+                            if !active_transfers.is_empty() {
+                                mongo_client
+                                    .insert_active_transfers_to_mongodb(active_transfers)
+                                    .await?;
+                            }
+                        }
+
+                        // store into a new collection a document that has all of the tickers
+                        // and their total_minted at this block height
+                        mongo_client
+                            .insert_tickers_total_minted_at_block_height(
+                                current_block_height.into(),
+                            )
+                            .await?;
+
+                        // After successfully processing the block, store the current_block_height
+                        match mongo_client
+                            .store_completed_block(current_block_height.into())
+                            .await
+                        {
+                            Ok(_) => (),
+                            Err(e) => {
+                                error!("Failed to store last processed block height: {:?}", e);
+                            }
+                        }
+
+                        // Increment the block height
+                        current_block_height += 1;
+                    }
+                    Err(e) => {
+                        error!("Failed to fetch block: {:?}", e);
+                        sleep(Duration::from_secs(60));
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to fetch block hash for height: {:?}", e);
+                sleep(Duration::from_secs(60));
+            }
+        }
+    }
+}
+
+pub async fn check_for_transfer_send(
+    mongo_client: &MongoClient,
+    rpc: &Client,
+    raw_tx_info: &GetRawTransactionResult,
+    block_height: u64,
+    tx_height: i64,
+    active_transfers: &mut HashMap<(String, i64), Brc20ActiveTransfer>,
+    transfer_documents: &mut Vec<Document>,
+    user_balance_entry_documents: &mut Vec<Document>,
+) -> Result<(), anyhow::Error> {
+    let transaction = raw_tx_info.transaction()?;
+
+    for (input_index, input) in transaction.input.iter().enumerate() {
+        let txid = input.previous_output.txid.to_string();
+        let vout = input.previous_output.vout as i64;
+        let key = (txid.clone(), vout);
+
+        // Check if active transfer exists in the HashMap
+        if active_transfers.contains_key(&key) {
+            active_transfers.remove(&key);
+        } else {
+            continue;
+        }
+
+        // Check if transfer exists in the transfer_documents vector
+        let transfer_doc_opt = transfer_documents.iter().find(|doc| {
+            doc.get_str("tx.txid").ok() == Some(&txid) && doc.get_i64("tx.vout").ok() == Some(vout)
+        });
+
+        let transfer_doc = match transfer_doc_opt {
+            Some(transfer_doc) => transfer_doc.clone(),
+            None => {
+                // get mongo doc for transfers collection that matches the txid and vout
+                let filter_doc = doc! {"tx.txid": txid.clone()};
+                match mongo_client
+                    .get_document_by_filter(consts::COLLECTION_TRANSFERS, filter_doc)
+                    .await?
+                {
+                    Some(doc) => doc,
+                    None => {
+                        log::error!(
+                            "Transfer inscription not found for txid: {}, vout: {}",
+                            txid,
+                            vout
+                        );
+                        continue;
+                    }
+                }
+            }
+        };
+
+        let mut tick = String::new();
+        if let Some(inscription) = transfer_doc.get_document("inscription").ok() {
+            if let Some(tck) = inscription.get_str("tick").ok() {
+                tick = tck.to_string();
+            } else {
+                error!("Failed to get 'tick' field from 'inscription'");
+            }
+        } else {
+            error!("Failed to get 'inscription' document");
+        }
+
+        let from = mongo_client.get_string(&transfer_doc, "from")?;
+        let amount = match mongo_client.get_f64(&transfer_doc, "amt") {
+            Some(amt) => amt,
+            None => 0.0,
+        };
+
+        let proper_vout = if input_index > 0 {
+            // if not in first input, get values of all inputs only up to this input
+            let input_values =
+                utils::transaction_inputs_to_values(rpc, &transaction.input[0..input_index])?;
+
+            // then get the sum these input values
+            let input_value_sum: u64 = input_values.iter().sum();
+
+            // Calculate the index of the output (vout) which is the recipient of the
+            // inscribed satoshi by finding the first output whose value is greater than
+            // or equal to the sum of all preceding input values. This is based on the
+            // assumption that inputs' and outputs' satoshisare processed in order
+            transaction
+                .output
+                .iter()
+                .scan(0, |acc, output| {
+                    *acc += output.value;
+                    Some(*acc)
+                })
+                .position(|value| value > input_value_sum)
+                .unwrap_or(transaction.output.len() - 1)
+        } else {
+            0
+        };
+
+        let receiver_address = get_owner_of_vout(&raw_tx_info, proper_vout)?;
+
+        // Update user overall balance and available for the from address(sender)
+        let user_entry_from = mongo_client
+            .insert_user_balance_entry(
+                &from,
+                amount,
+                &tick,
+                block_height,
+                UserBalanceEntryType::Send,
+            )
+            .await?;
+
+        user_balance_entry_documents.push(user_entry_from.to_document());
+
+        // Update user overall balance and available for the to address(receiver)
+        let user_entry_to = mongo_client
+            .insert_user_balance_entry(
+                &receiver_address.to_string(),
+                amount,
+                &tick,
+                block_height,
+                UserBalanceEntryType::Receive,
+            )
+            .await?;
+
+        user_balance_entry_documents.push(user_entry_to.to_document());
+
+        //-------------MONGODB-------------------//
+        // Update the transfer document in MongoDB (check in memory first)
+        update_transfer_document(
+            mongo_client,
+            &txid,
+            vout,
+            &receiver_address,
+            block_height.try_into().unwrap(),
+            tx_height,
+            &raw_tx_info,
+            transfer_documents,
+        )
+        .await?;
+
+        // Update user available and transferable balance for the sender in MongoDB
+        mongo_client
+            .update_sender_user_balance_document(&from, amount, &tick)
+            .await?;
+
+        // Update user overall balance for the receiver in MongoDB
+        mongo_client
+            .update_receiver_balance_document(&receiver_address.to_string(), amount, &tick)
+            .await?;
+
+        info!(
+            "Transfer inscription found for txid: {}, vout: {}",
+            txid, vout
+        );
+        info!(
+            "Amount transferred: {}, to: {}",
+            amount,
+            receiver_address.to_string()
+        );
+    }
+
+    Ok(())
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Brc20Inscription {
@@ -66,366 +544,6 @@ impl std::fmt::Display for Brc20Inscription {
             "p: {}, op: {}, tick: {}, amt: {:?}, max: {:?}, lim: {:?}, dec: {:?}",
             self.p, self.op, self.tick, self.amt, self.max, self.lim, self.dec
         )
-    }
-}
-
-// Brc20Index is a struct that represents
-// all Brc 20 Tickers and invalid Brc 20 Txs.
-#[derive(Debug)]
-pub struct Brc20Index {
-    // The BRC-20 tickers.
-    pub tickers: HashMap<String, Brc20Ticker>,
-    // The invalid BRC-20 transactions.
-    pub invalid_tx_map: InvalidBrc20TxMap,
-    // The active BRC-20 transfer inscriptions.
-    pub active_transfer_inscriptions: HashMap<OutPoint, String>,
-}
-
-impl Brc20Index {
-    pub fn new() -> Self {
-        Brc20Index {
-            tickers: HashMap::new(),
-            invalid_tx_map: InvalidBrc20TxMap::new(),
-            active_transfer_inscriptions: HashMap::new(),
-        }
-    }
-
-    pub async fn check_for_transfer_send(
-        &mut self,
-        mongo_client: &MongoClient,
-        rpc: &Client,
-        raw_tx_info: &GetRawTransactionResult,
-        block_height: u64,
-        active_transfers: &mut HashMap<(String, i64), Brc20ActiveTransfer>,
-    ) -> Result<(), anyhow::Error> {
-        let transaction = raw_tx_info.transaction()?;
-
-        for (input_index, input) in transaction.input.iter().enumerate() {
-            let txid = input.previous_output.txid.to_string();
-            let vout = input.previous_output.vout as i64;
-            let key = (txid.clone(), vout);
-
-            // if empty there are no active transfers
-            if active_transfers.is_empty() {
-                continue;
-            }
-
-            // Check if active transfer exists in the HashMap
-            if !active_transfers.contains_key(&key) {
-                continue;
-            } else {
-                active_transfers.remove(&key);
-            }
-
-            // get mongo doc for transfers collection that matches the txid and vout
-            let filter_doc = doc! {"tx.txid": txid.to_string() };
-            let transfer_doc = match mongo_client
-                .get_document_by_filter(consts::COLLECTION_TRANSFERS, filter_doc)
-                .await?
-            {
-                Some(doc) => doc,
-                None => {
-                    log::error!(
-                        "Transfer inscription not found for txid: {}, vout: {}",
-                        txid,
-                        vout
-                    );
-                    continue;
-                }
-            };
-
-            let mut tick = String::new();
-            if let Some(inscription) = transfer_doc.get_document("inscription").ok() {
-                if let Some(tck) = inscription.get_str("tick").ok() {
-                    tick = tck.to_string();
-                } else {
-                    error!("Failed to get 'tick' field from 'inscription'");
-                }
-            } else {
-                error!("Failed to get 'inscription' document");
-            }
-
-            let from = mongo_client.get_string(&transfer_doc, "from")?;
-            let amount = match mongo_client.get_f64(&transfer_doc, "amt") {
-                Some(amt) => amt,
-                None => 0.0,
-            };
-
-            let proper_vout = if input_index > 0 {
-                // if not in first input, get values of all inputs only up to this input
-                let input_values =
-                    utils::transaction_inputs_to_values(rpc, &transaction.input[0..input_index])?;
-
-                // then get the sum these input values
-                let input_value_sum: u64 = input_values.iter().sum();
-
-                // Calculate the index of the output (vout) which is the recipient of the
-                // current input by finding the first output whose value is greater than
-                // or equal to the sum of all preceding input values. This is based on the
-                // assumption that inputs and outputs are processed in order and each input's
-                // value goes to the next output that it fully covers.
-                transaction
-                    .output
-                    .iter()
-                    .scan(0, |acc, output| {
-                        *acc += output.value;
-                        Some(*acc)
-                    })
-                    .position(|value| value >= input_value_sum)
-                    .unwrap_or(transaction.output.len() - 1)
-            } else {
-                0
-            };
-
-            let receiver_address = get_owner_of_vout(&raw_tx_info, proper_vout)?;
-
-            // Update user overall balance and available for the from address(sender) in MongoDB
-            mongo_client
-                .insert_user_balance_entry(
-                    &from,
-                    amount,
-                    &tick,
-                    block_height,
-                    UserBalanceEntryType::Send,
-                )
-                .await?;
-
-            // Update user overall balance and available for the to address(receiver) in MongoDB
-            mongo_client
-                .insert_user_balance_entry(
-                    &receiver_address.to_string(),
-                    amount,
-                    &tick,
-                    block_height,
-                    UserBalanceEntryType::Receive,
-                )
-                .await?;
-
-            //-------------MONGODB-------------------//
-            // Update the transfer document in MongoDB
-            update_transfer_document(mongo_client, txid, &receiver_address, &raw_tx_info).await?;
-
-            // Update user available and transferable balance for the sender in MongoDB
-            mongo_client
-                .update_sender_user_balance_document(&from.to_string(), amount, &tick)
-                .await?;
-
-            // Update user overall balance for the receiver in MongoDB
-            mongo_client
-                .update_receiver_balance_document(&receiver_address.to_string(), amount, &tick)
-                .await?;
-        }
-
-        Ok(())
-    }
-}
-
-pub async fn index_brc20(
-    rpc: &Client,
-    mongo_client: &MongoClient,
-    start_block_height: u32,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Instantiate a new `Brc20Index` struct.
-    let mut brc20_index = Brc20Index::new();
-
-    let mut current_block_height = start_block_height;
-
-    loop {
-        match rpc.get_block_hash(current_block_height.into()) {
-            Ok(current_block_hash) => {
-                match rpc.get_block(&current_block_hash) {
-                    Ok(block) => {
-                        let length = block.txdata.len();
-                        info!(
-                            "Fetched block: {:?}, Transactions: {:?}, Block: {:?}",
-                            current_block_hash, length, current_block_height
-                        );
-
-                        let mut active_transfers_opt = mongo_client.load_active_transfers().await?;
-
-                        // If active_transfers_opt is None, initialize it with a new HashMap
-                        if active_transfers_opt.is_none() {
-                            active_transfers_opt = Some(HashMap::new());
-                        } else {
-                            // drop active transfer collection
-                            mongo_client
-                                .drop_collection(consts::COLLECTION_BRC20_ACTIVE_TRANSFERS)
-                                .await?;
-                        }
-
-                        let mut tx_height = 0u32;
-                        for transaction in block.txdata {
-                            let txid = transaction.txid();
-                            // Get Raw Transaction Info
-                            let raw_tx = match rpc.get_raw_transaction_info(&txid, None) {
-                                Ok(tx) => tx,
-                                Err(e) => {
-                                    error!("Failed to get raw transaction info: {:?}", e);
-                                    continue; // This will skip the current iteration of the loop
-                                }
-                            };
-
-                            // Get witness data from raw transaction
-                            let witness_data = match get_witness_data_from_raw_tx(&raw_tx) {
-                                Ok(data) => data,
-                                Err(e) => {
-                                    error!("Failed to get witness data: {:?}", e);
-                                    continue;
-                                }
-                            };
-
-                            for witness in witness_data {
-                                if let Some(inscription) = extract_and_process_witness_data(witness)
-                                {
-                                    // print pretty json
-                                    let pretty_json =
-                                        serde_json::to_string(&inscription).unwrap_or_default();
-                                    info!("Raw Brc-20 data: {}", pretty_json);
-
-                                    // get owner address, inscription is first satoshi of first output
-                                    let owner = match get_owner_of_vout(&raw_tx, 0) {
-                                        Ok(owner) => owner,
-                                        Err(e) => {
-                                            error!("Failed to get owner: {:?}", e);
-                                            continue;
-                                        }
-                                    };
-
-                                    match &inscription.op[..] {
-                                        "deploy" => {
-                                            match handle_deploy_operation(
-                                                mongo_client,
-                                                inscription,
-                                                raw_tx.clone(),
-                                                owner.clone(),
-                                                current_block_height,
-                                                tx_height,
-                                            )
-                                            .await
-                                            {
-                                                Ok(_) => (),
-                                                Err(e) => {
-                                                    error!(
-                                                        "Error handling deploy operation: {:?}",
-                                                        e
-                                                    );
-                                                }
-                                            };
-                                        }
-                                        "mint" => {
-                                            match handle_mint_operation(
-                                                mongo_client,
-                                                current_block_height,
-                                                tx_height,
-                                                owner,
-                                                inscription,
-                                                &raw_tx,
-                                            )
-                                            .await
-                                            {
-                                                Ok(_) => (),
-                                                Err(e) => {
-                                                    error!(
-                                                        "Error handling mint operation: {:?}",
-                                                        e
-                                                    );
-                                                }
-                                            };
-                                        }
-                                        "transfer" => {
-                                            match handle_transfer_operation(
-                                                mongo_client,
-                                                current_block_height,
-                                                tx_height,
-                                                inscription,
-                                                raw_tx.clone(),
-                                                owner.clone(),
-                                                &mut active_transfers_opt,
-                                            )
-                                            .await
-                                            {
-                                                Ok(_) => (),
-                                                Err(e) => {
-                                                    error!(
-                                                        "Error handling transfer inscription: {:?}",
-                                                        e
-                                                    );
-                                                }
-                                            };
-                                        }
-                                        _ => {
-                                            // Unexpected operation
-                                            error!("Unexpected operation: {}", inscription.op);
-                                        }
-                                    }
-                                } else {
-                                    if active_transfers_opt.is_none() {
-                                        active_transfers_opt = Some(HashMap::new());
-                                    }
-
-                                    if let Some(ref mut active_transfers) =
-                                        &mut active_transfers_opt
-                                    {
-                                        match brc20_index
-                                            .check_for_transfer_send(
-                                                mongo_client,
-                                                &rpc,
-                                                &raw_tx,
-                                                current_block_height.into(),
-                                                active_transfers,
-                                            )
-                                            .await
-                                        {
-                                            Ok(_) => (),
-                                            Err(e) => {
-                                                error!("Error checking for transfer send: {:?}", e);
-                                            }
-                                        };
-                                    }
-                                }
-                            }
-                            // Increment the tx height
-                            tx_height += 1;
-                        }
-
-                        // store active transfer collection
-                        if let Some(active_transfers) = active_transfers_opt {
-                            // make sure the active transfers collection is not empty
-                            if !active_transfers.is_empty() {
-                                // store active transfers to mongodb
-                                mongo_client
-                                    .insert_active_transfers_to_mongodb(active_transfers)
-                                    .await?;
-                            }
-                        }
-
-                        // After successfully processing the block, store the current_block_height
-                        match mongo_client
-                            .store_completed_block(current_block_height.into())
-                            .await
-                        {
-                            Ok(_) => (),
-                            Err(e) => {
-                                error!("Failed to store last processed block height: {:?}", e);
-                                // what do we do if the height can't be stored?
-                            }
-                        }
-
-                        // Increment the block height
-                        current_block_height += 1;
-                    }
-                    Err(e) => {
-                        error!("Failed to fetch block: {:?}", e);
-                        sleep(Duration::from_secs(60));
-                    }
-                }
-            }
-            Err(e) => {
-                error!("Failed to fetch block hash for height: {:?}", e);
-                sleep(Duration::from_secs(60));
-            } //
-              // TODO: save to MongoDB this block height and timestamp
-        }
     }
 }
 
@@ -492,28 +610,39 @@ impl ToDocument for GetRawTransactionResultVout {
     }
 }
 
-// This function will update the transfer document in MongoDB with receiver and send_tx
 pub async fn update_transfer_document(
     mongo_client: &MongoClient,
-    tx_id: String,
+    tx_id: &str,
+    vout: i64,
     receiver_address: &Address,
+    send_block_height: i64,
+    send_tx_height: i64,
     send_tx: &GetRawTransactionResult,
+    transfer_documents: &mut Vec<Document>,
 ) -> Result<(), anyhow::Error> {
-    let update_doc = doc! {
-        "$set": {
-            "to": receiver_address.to_string(),
-            "send_tx": send_tx.to_document(),
-        }
-    };
+    // Check if the transfer exists in the transfer_documents vector
+    if let Some(transfer_doc) = transfer_documents.iter_mut().find(|doc| {
+        doc.get_str("tx.txid").ok() == Some(tx_id) && doc.get_i64("tx.vout").ok() == Some(vout)
+    }) {
+        // If it does, update it
+        transfer_doc.insert("to", receiver_address.to_string());
+        transfer_doc.insert("send_tx", send_tx.to_document());
+    } else {
+        // If it doesn't exist in the transfer_documents vector, update it in MongoDB
+        let update_doc = doc! {
+            "$set": {
+                "to": receiver_address.to_string(),
+                "send_tx": send_tx.to_document(),
+                "send_block_height": send_block_height,
+                "send_tx_height": send_tx_height,
+            }
+        };
 
-    // Update the document in MongoDB
-    mongo_client
-        .update_document_by_field(
-            consts::COLLECTION_TRANSFERS,
-            "tx.txid",
-            &tx_id.to_string(),
-            update_doc,
-        )
-        .await?;
+        // Update the document in MongoDB
+        mongo_client
+            .update_document_by_field(consts::COLLECTION_TRANSFERS, "tx.txid", tx_id, update_doc)
+            .await?;
+    }
+
     Ok(())
 }

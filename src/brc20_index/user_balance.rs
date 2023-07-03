@@ -1,8 +1,7 @@
-use super::{mint::Brc20Mint, transfer::Brc20Transfer, ToDocument};
-use bitcoin::OutPoint;
+use super::ToDocument;
 use mongodb::bson::{doc, Bson, DateTime, Document};
 use serde::Serialize;
-use std::{collections::HashMap, fmt};
+use std::fmt;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UserBalance {
@@ -11,10 +10,6 @@ pub struct UserBalance {
     pub overall_balance: f64,
     pub available_balance: f64,
     pub transferable_balance: f64,
-    active_transfer_inscriptions: HashMap<OutPoint, Brc20Transfer>,
-    transfer_sends: Vec<Brc20Transfer>,
-    transfer_receives: Vec<Brc20Transfer>,
-    mints: Vec<Brc20Mint>,
 }
 
 impl ToDocument for UserBalance {
@@ -30,21 +25,17 @@ impl ToDocument for UserBalance {
     }
 }
 
-impl UserBalance {
-    pub fn new(address: String, tick: String) -> Self {
-        UserBalance {
-            address,
-            tick,
-            overall_balance: 0.0,
-            available_balance: 0.0,
-            transferable_balance: 0.0,
-            active_transfer_inscriptions: HashMap::new(),
-            transfer_sends: Vec::new(),
-            transfer_receives: Vec::new(),
-            mints: Vec::new(),
-        }
-    }
-}
+// impl UserBalance {
+//     pub fn new(address: String, tick: String) -> Self {
+//         UserBalance {
+//             address,
+//             tick,
+//             overall_balance: 0.0,
+//             available_balance: 0.0,
+//             transferable_balance: 0.0,
+//         }
+//     }
+// }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UserBalanceEntry {
@@ -53,6 +44,18 @@ pub struct UserBalanceEntry {
     pub block_height: u64,
     pub amt: f64,
     pub entry_type: String,
+}
+
+impl Default for UserBalanceEntry {
+    fn default() -> Self {
+        Self {
+            address: String::default(),
+            tick: String::default(),
+            block_height: 0,
+            amt: 0.0,
+            entry_type: String::default(),
+        }
+    }
 }
 
 impl UserBalanceEntry {
@@ -111,7 +114,7 @@ impl From<&str> for UserBalanceEntryType {
             "inscription" => UserBalanceEntryType::Inscription,
             "send" => UserBalanceEntryType::Send,
             "receive" => UserBalanceEntryType::Receive,
-            _ => panic!("Invalid UserBalanceEntryType"), // Decide how to handle invalid input
+            _ => panic!("Invalid UserBalanceEntryType"),
         }
     }
 }

@@ -1,11 +1,6 @@
-use super::{
-    deploy::Brc20Deploy, mint::Brc20Mint, transfer::Brc20Transfer, user_balance::UserBalance,
-    ToDocument,
-};
-use bitcoin::Address;
+use super::{deploy::Brc20Deploy, ToDocument};
 use mongodb::bson::{doc, Bson, DateTime, Document};
 use serde::Serialize;
-use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Brc20Ticker {
@@ -15,9 +10,6 @@ pub struct Brc20Ticker {
     pub total_minted: f64,
     pub decimals: u8,
     pub deploy: Brc20Deploy,
-    pub mints: Vec<Brc20Mint>,
-    pub transfers: Vec<Brc20Transfer>,
-    pub balances: HashMap<Address, UserBalance>,
 }
 
 impl ToDocument for Brc20Ticker {
@@ -48,9 +40,6 @@ impl Brc20Ticker {
             total_minted: 0.0,
             decimals,
             deploy,
-            mints: Vec::new(),
-            transfers: Vec::new(),
-            balances: HashMap::new(),
         }
     }
 

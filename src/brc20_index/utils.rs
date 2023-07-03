@@ -45,12 +45,8 @@ pub fn extract_and_process_witness_data(witness_data: String) -> Option<Brc20Ins
             // Try to parse the JSON data
             match serde_json::from_str::<Brc20Inscription>(json_data) {
                 Ok(parsed_data) => {
-                    // Only return the parsed data if it contains the expected fields
+                    // Only return the parsed data if it contains brc-20
                     if parsed_data.p == "brc-20" {
-                        // // Convert the data to JSON string with null values represented as "null"
-                        // let json_string = serde_json::to_string(&parsed_data).unwrap_or_default();
-                        // println!("{}", json_string);
-
                         return Some(parsed_data);
                     }
                 }
