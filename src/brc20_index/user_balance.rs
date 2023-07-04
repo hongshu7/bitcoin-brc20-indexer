@@ -25,17 +25,17 @@ impl ToDocument for UserBalance {
     }
 }
 
-// impl UserBalance {
-//     pub fn new(address: String, tick: String) -> Self {
-//         UserBalance {
-//             address,
-//             tick,
-//             overall_balance: 0.0,
-//             available_balance: 0.0,
-//             transferable_balance: 0.0,
-//         }
-//     }
-// }
+impl UserBalance {
+    pub fn new(address: String, tick: String) -> Self {
+        UserBalance {
+            address,
+            tick,
+            overall_balance: 0.0,
+            available_balance: 0.0,
+            transferable_balance: 0.0,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UserBalanceEntry {

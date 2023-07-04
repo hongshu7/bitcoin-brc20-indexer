@@ -220,14 +220,16 @@ pub async fn update_balances_and_ticker(
     mongo_client: &MongoClient,
     validated_mint_tx: &Brc20Mint,
     tickers: &mut HashMap<String, Document>,
+    user_balance_docs: &mut Vec<Document>,
 ) -> Result<UserBalanceEntry, Box<dyn std::error::Error>> {
     if validated_mint_tx.is_valid() {
-        // Update user overall balance and available for the receiver in MongoDB
+        // Update user overall balance and available for the receiver
         mongo_client
             .update_receiver_balance_document(
                 &validated_mint_tx.to.to_string(),
                 validated_mint_tx.amt,
                 &validated_mint_tx.inscription.tick.to_lowercase(),
+                user_balance_docs,
             )
             .await?;
 
@@ -241,7 +243,7 @@ pub async fn update_balances_and_ticker(
         .await?;
     }
 
-    // Insert user balance entry
+    // return user balance entry
     Ok(mongo_client
         .insert_user_balance_entry(
             &validated_mint_tx.to.to_string(),
@@ -261,9 +263,9 @@ pub async fn handle_mint_operation(
     inscription: Brc20Inscription,
     raw_tx: &GetRawTransactionResult,
     tickers: &mut HashMap<String, Document>,
+    user_balance_docs: &mut Vec<Document>,
     invalid_brc20_docs: &mut Vec<Document>,
 ) -> Result<(Brc20Mint, UserBalanceEntry), Box<dyn std::error::Error>> {
-    // Note: pre_validate_mint now also takes a reference to the tickers hashmap
     let validated_mint_tx = pre_validate_mint(
         mongo_client,
         block_height,
@@ -286,9 +288,14 @@ pub async fn handle_mint_operation(
         );
         info!("TO Address: {:?}", validated_mint_tx.to);
 
-        // update_balances_and_ticker now also takes a reference to the tickers hashmap
-        user_balance_entry =
-            update_balances_and_ticker(mongo_client, &validated_mint_tx, tickers).await?;
+        // update_balances_and_ticker
+        user_balance_entry = update_balances_and_ticker(
+            mongo_client,
+            &validated_mint_tx,
+            tickers,
+            user_balance_docs,
+        )
+        .await?;
     }
 
     Ok((validated_mint_tx, user_balance_entry))

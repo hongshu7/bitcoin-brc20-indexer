@@ -11,6 +11,7 @@ use log::{error, info};
 use serde_json;
 use serde_json::Value;
 use std::env;
+use std::time::Instant;
 
 mod brc20_index;
 
@@ -96,13 +97,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 mongo_host_consul[2].as_str().unwrap(),
             )
         };
-
-        // mongo_connection_str = format!(
-        //     "mongodb://{}:27017,{}:27017,{}:27017/omnisat?replicaSet=rs0",
-        //     mongo_host_consul[0].as_str().unwrap(),
-        //     mongo_host_consul[1].as_str().unwrap(),
-        //     mongo_host_consul[2].as_str().unwrap(),
-        // );
     } else {
         mongo_direct_connection_str = env::var("MONGO_DIRECT_CONNECTION").unwrap();
         mongo_direct_connection = mongo_direct_connection_str.to_lowercase() == "true";
@@ -135,6 +129,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Call create_indexes after MongoClient has been initialized
     mongo_client.create_indexes().await?;
 
+    info!("Retrieving starting block height...");
+    let start = Instant::now();
     // get block height to start indexing from
     let mut start_block_height = consts::BRC20_STARTING_BLOCK_HEIGHT; // default starting point
     let last_completed_block = mongo_client
@@ -148,6 +144,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Starting indexing from block height: {}",
         start_block_height
     );
+
+    log::warn!("Retrieved starting block height: {:?}", start.elapsed());
+
+    info!("Deleting incomplete records...");
+    let start = Instant::now();
+
     // if BRC20_STARTING_BLOCK_HEIGHT is < start_block_height, then we need to delete everything in db that is >= start_block_height
     // delete deploys, mints, transfers, inscriptions, tickers, invalids, entries
     if consts::BRC20_STARTING_BLOCK_HEIGHT < start_block_height {
@@ -168,29 +170,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .await?;
         }
 
+        log::warn!("Incomplete Block Records deleted: {:?}", start.elapsed());
+
+        let start = Instant::now();
+        //recalculate total_minted for each ticker
+        info!("Recalculating total_minted for all tickers...");
+        match mongo_client
+            .update_ticker_totals(start_block_height - 1)
+            .await
+        {
+            Ok(_) => {
+                log::warn!("Recalculation complete: {:?}", start.elapsed())
+            }
+            Err(e) => info!("Error recalculating total_minted for all tickers: {:?}", e),
+        };
+
+        info!("Deleting User Balances...");
+        let start = Instant::now();
         //delete user balance collection
         mongo_client
             .drop_collection(consts::COLLECTION_USER_BALANCES)
             .await?;
 
-        //recalculate total_minted for each ticker
-        info!("Recalculating total_minted for all tickers...");
-        info!(
-            "Start block_height for update tickers: {}",
-            start_block_height - 1
-        );
-        match mongo_client
-            .update_ticker_totals(start_block_height - 1)
-            .await
-        {
-            Ok(_) => info!("Recalculation complete."),
-            Err(e) => info!("Error recalculating total_minted for all tickers: {:?}", e),
-        };
+        log::warn!("User Balances Deleted: {:?}", start.elapsed());
 
         // rebuild userbalances
-        info!("Recreating userbalances...");
-        match mongo_client.rebuild_user_balances().await {
-            Ok(_) => info!("Recreation complete."),
+        info!("Rebuilding User Balances...");
+        let start = Instant::now();
+        match mongo_client
+            .rebuild_user_balances(start_block_height - 1)
+            .await
+        {
+            Ok(_) => {
+                log::warn!("User Balances rebuilt: {:?}", start.elapsed());
+            }
             Err(e) => info!("Error recreating userbalances: {:?}", e),
         };
     }

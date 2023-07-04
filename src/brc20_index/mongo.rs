@@ -3,7 +3,8 @@ use std::env;
 use std::time::Duration;
 
 use super::transfer::Brc20ActiveTransfer;
-use super::user_balance::{UserBalanceEntry, UserBalanceEntryType};
+use super::user_balance::{UserBalance, UserBalanceEntry, UserBalanceEntryType};
+use super::ToDocument;
 use crate::brc20_index::consts;
 use futures_util::stream::TryStreamExt;
 use futures_util::StreamExt;
@@ -66,17 +67,6 @@ impl MongoClient {
         Err(anyhow::anyhow!(
             "Failed to insert document after all retries"
         ))
-    }
-
-    pub async fn update_document_by_filter(
-        &self,
-        collection_name: &str,
-        filter: Document,
-        update_doc: Document,
-        update_options: Option<UpdateOptions>,
-    ) -> anyhow::Result<()> {
-        self.update_one_with_retries(collection_name, filter, update_doc, update_options)
-            .await
     }
 
     pub async fn update_one_with_retries(
@@ -310,45 +300,60 @@ impl MongoClient {
         ))
     }
 
-    // Method to update the balance document for a receiver in MongoDB
     pub async fn update_receiver_balance_document(
-        &self,                  // reference to the MongoClient
-        receiver_address: &str, // address of the receiver
-        amount: f64,            // amount to add
-        tick: &str,             // token symbol
+        &self,
+        receiver_address: &str,
+        amount: f64,
+        tick: &str,
+        user_balance_docs: &mut Vec<Document>,
     ) -> Result<(), anyhow::Error> {
-        // Prepare the filter document to find the specific user's balance document
-        let filter = doc! {
-            "address": receiver_address,
-            "tick": tick
-        };
-
-        // Prepare the update document to increment overall and available balances
-        // "$inc" operator increments the value of the field by the specified amount
-        let update_doc = doc! {
-            "$setOnInsert": { "transferable_balance": 0.0, "created_at": Bson::DateTime(DateTime::now()) },
-            "$inc": {
-                consts::OVERALL_BALANCE: amount,
-                consts::AVAILABLE_BALANCE: amount,
+        // Find the user balance in the vector or create a new one
+        let user_balance = match user_balance_docs.iter_mut().find(|doc| {
+            match (doc.get_str("address"), doc.get_str("tick")) {
+                (Ok(address), Ok(ticker)) => address == receiver_address && ticker == tick,
+                _ => false,
             }
-        };
+        }) {
+            Some(doc) => Ok(doc),
+            None => {
+                // If the UserBalance doesn't exist, create a new one
+                let new_balance = UserBalance::new(receiver_address.to_string(), tick.to_string());
 
-        // Prepare the options for the update operation
-        // Upsert is set to true which will insert a new document if no document matches the filter
-        let update_options = UpdateOptions::builder().upsert(true).build();
+                // Convert the UserBalance to a Document and add it to the vector
+                let new_balance_doc = new_balance.to_document();
+                user_balance_docs.push(new_balance_doc.clone());
 
-        // Perform the update operation
-        // If a document matching the filter is found, it is updated
-        // If no matching document is found, a new document is inserted due to the upsert option
-        self.update_document_by_filter(
-            consts::COLLECTION_USER_BALANCES,
-            filter,
-            update_doc,
-            Some(update_options),
-        )
-        .await?;
+                // Get a mutable reference to the new Document
+                user_balance_docs.last_mut().ok_or(anyhow::anyhow!(
+                    "Failed to get the last document after insertion"
+                ))
+            }
+        }?;
 
-        // Return Ok if the operation is successful
+        // Get the overall and available balance values
+        let overall_balance = user_balance
+            .get(consts::OVERALL_BALANCE)
+            .and_then(Bson::as_f64)
+            .unwrap_or_default();
+        let available_balance = user_balance
+            .get(consts::AVAILABLE_BALANCE)
+            .and_then(Bson::as_f64)
+            .unwrap_or_default();
+
+        // Update the values
+        let updated_overall_balance = overall_balance + amount;
+        let updated_available_balance = available_balance + amount;
+
+        // Update the document
+        user_balance.insert(
+            consts::OVERALL_BALANCE.to_string(),
+            Bson::Double(updated_overall_balance),
+        );
+        user_balance.insert(
+            consts::AVAILABLE_BALANCE.to_string(),
+            Bson::Double(updated_available_balance),
+        );
+
         Ok(())
     }
 
@@ -358,31 +363,42 @@ impl MongoClient {
         from: &str,
         amount: f64,
         tick: &str,
+        user_balance_docs: &mut Vec<Document>,
     ) -> Result<(), anyhow::Error> {
+        // Prepare the filter document
         let filter = doc! {
-          "address": from,
-          "tick": tick
+            "address": from,
+            "tick": tick
         };
 
-        // Prepare the update document to decrement overall and transferable balances
-        // "$inc" operator increments the value of the field by the specified amount
-        // Here we are using negative amounts to decrease the balances
-        let update_doc = doc! {
-            "$inc": {
-                consts::OVERALL_BALANCE: -amount,
-                consts::TRANSFERABLE_BALANCE: -amount,
-            }
-        };
+        // Find the user balance document in the vector
+        if let Some(user_balance) = user_balance_docs.iter_mut().find(|doc| doc == &&filter) {
+            // Get the overall balance and transferable balance values
+            let overall_balance = user_balance
+                .get(consts::OVERALL_BALANCE)
+                .and_then(Bson::as_f64)
+                .unwrap_or_default();
+            let transferable_balance = user_balance
+                .get(consts::TRANSFERABLE_BALANCE)
+                .and_then(Bson::as_f64)
+                .unwrap_or_default();
 
-        // Update the document in MongoDB
-        let update_options = UpdateOptions::builder().upsert(false).build();
-        self.update_document_by_filter(
-            consts::COLLECTION_USER_BALANCES,
-            filter,
-            update_doc,
-            Some(update_options),
-        )
-        .await?;
+            // Update the values
+            let updated_overall_balance = overall_balance - amount;
+            let updated_transferable_balance = transferable_balance - amount;
+
+            // Update the document
+            user_balance.insert(
+                consts::OVERALL_BALANCE.to_string(),
+                Bson::Double(updated_overall_balance),
+            );
+            user_balance.insert(
+                consts::TRANSFERABLE_BALANCE.to_string(),
+                Bson::Double(updated_transferable_balance),
+            );
+        } else {
+            return Err(anyhow::anyhow!("User balance document not found in memory"));
+        }
 
         Ok(())
     }
@@ -392,6 +408,7 @@ impl MongoClient {
         from: &str,
         amount: f64,
         tick: &str,
+        user_balance_docs: &mut Vec<Document>,
     ) -> Result<(), anyhow::Error> {
         // Prepare the filter document
         let filter = doc! {
@@ -399,26 +416,34 @@ impl MongoClient {
             "tick": tick
         };
 
-        // Prepare the update document
-        // "$inc" operator increments the value of the field by the specified amount
-        // Here, it's decrementing the `consts::AVAILABLE_BALANCE` by `amount`
-        // and incrementing the `consts::TRANSFERABLE_BALANCE` by `amount`
-        let update_doc = doc! {
-            "$inc": {
-                consts::AVAILABLE_BALANCE: -amount,
-                consts::TRANSFERABLE_BALANCE: amount,
-            }
-        };
+        // Find the user balance document in the vector
+        if let Some(user_balance) = user_balance_docs.iter_mut().find(|doc| doc == &&filter) {
+            // Get the available balance and transferable balance values
+            let available_balance = user_balance
+                .get(consts::AVAILABLE_BALANCE)
+                .and_then(Bson::as_f64)
+                .unwrap_or_default();
+            let transferable_balance = user_balance
+                .get(consts::TRANSFERABLE_BALANCE)
+                .and_then(Bson::as_f64)
+                .unwrap_or_default();
 
-        // Update the document in MongoDB
-        let update_options = UpdateOptions::builder().upsert(false).build();
-        self.update_document_by_filter(
-            consts::COLLECTION_USER_BALANCES,
-            filter,
-            update_doc,
-            Some(update_options),
-        )
-        .await?;
+            // Update the values
+            let updated_available_balance = available_balance - amount;
+            let updated_transferable_balance = transferable_balance + amount;
+
+            // Update the document
+            user_balance.insert(
+                consts::AVAILABLE_BALANCE.to_string(),
+                Bson::Double(updated_available_balance),
+            );
+            user_balance.insert(
+                consts::TRANSFERABLE_BALANCE.to_string(),
+                Bson::Double(updated_transferable_balance),
+            );
+        } else {
+            return Err(anyhow::anyhow!("User balance document not found in memory"));
+        }
 
         Ok(())
     }
@@ -480,68 +505,48 @@ impl MongoClient {
         Ok(())
     }
 
-    pub async fn rebuild_user_balances(&self) -> anyhow::Result<()> {
-        let db = self.client.database(&self.db_name);
+    pub async fn rebuild_user_balances(&self, block_height: i64) -> anyhow::Result<()> {
+        let doc_option = self.get_ticker_totals_by_block_height(block_height).await?;
 
-        // Fetch all user balance entries
-        let user_balance_entries_coll =
-            db.collection::<bson::Document>(consts::COLLECTION_USER_BALANCE_ENTRY);
-        let cursor = user_balance_entries_coll.find(None, None).await?;
-        let user_balance_entries: Vec<Document> = cursor.try_collect().await?;
+        // Extract the user_balances field from the document
+        let user_balance_docs = match doc_option {
+            Some(doc) => match doc.get_array("user_balances") {
+                Ok(user_balance_bson_array) => user_balance_bson_array
+                    .into_iter()
+                    .map(|bson| bson.as_document().cloned())
+                    .collect::<Option<Vec<Document>>>(),
+                Err(_) => None,
+            },
+            None => None,
+        };
 
-        // Prepare a HashMap to hold user balances
-        let mut user_balances: HashMap<String, HashMap<String, (f64, f64, f64)>> = HashMap::new();
+        // Check if the user balances were successfully extracted
+        let user_balance_docs = match user_balance_docs {
+            Some(docs) => docs,
+            None => return Err(anyhow::anyhow!("Failed to extract user balances")),
+        };
 
-        // Iterate over user balance entries
-        for user_balance_entry in user_balance_entries {
-            let address = user_balance_entry.get_str("address")?;
-            let ticker = user_balance_entry.get_str("tick")?;
-            let amount = user_balance_entry.get_f64("amt")?;
-            let entry_type: UserBalanceEntryType =
-                UserBalanceEntryType::from(user_balance_entry.get_str("entry_type")?);
+        // Iterate over the extracted user balances and use them to rebuild the user balance data
+        for user_balance_doc in user_balance_docs {
+            // Get the necessary fields from the document
+            let address = user_balance_doc.get_str("address")?;
+            let ticker = user_balance_doc.get_str("tick")?;
+            let available_balance = user_balance_doc.get_f64("available_balance")?;
+            let transferable_balance = user_balance_doc.get_f64("transferable_balance")?;
+            let overall_balance = user_balance_doc.get_f64("overall_balance")?;
 
-            let user_balance = user_balances
-                .entry(address.to_string())
-                .or_insert_with(HashMap::new);
-            let balance = user_balance
-                .entry(ticker.to_string())
-                .or_insert((0.0, 0.0, 0.0)); // (available_balance, transferable_balance, overall balance)
+            // Construct a new user balance document
+            let new_user_balance = doc! {
+                "address": &address,
+                "tick": &ticker,
+                "available_balance": available_balance,
+                "transferable_balance": transferable_balance,
+                "overall_balance": overall_balance,
+            };
 
-            // Adjust balances based on entry type
-            match entry_type {
-                UserBalanceEntryType::Receive => {
-                    balance.0 += amount; // Increase the available balance
-                    balance.2 += amount; // Increase the overall balance
-                }
-                UserBalanceEntryType::Send => {
-                    balance.1 -= amount; // Decrease the transferable balance
-                    balance.2 -= amount; // Decrease the overall balance
-                }
-                UserBalanceEntryType::Inscription => {
-                    balance.0 -= amount; // Decrease the available balance
-                    balance.1 += amount; // Increase the transferable balance
-                }
-            }
-        }
-
-        // Iterate over the constructed user balances
-        for (address, ticker_balances) in user_balances {
-            for (ticker, (available_balance, transferable_balance, overall_balance)) in
-                ticker_balances
-            {
-                // Construct a new user balance document
-                let new_user_balance = doc! {
-                    "address": &address,
-                    "tick": &ticker,
-                    "available_balance": available_balance,
-                    "transferable_balance": transferable_balance,
-                    "overall_balance": overall_balance,
-                };
-
-                // Insert the new document into the MongoDB collection
-                self.insert_document(consts::COLLECTION_USER_BALANCES, new_user_balance)
-                    .await?;
-            }
+            // Insert the new document into the MongoDB collection
+            self.insert_document(consts::COLLECTION_USER_BALANCES, new_user_balance)
+                .await?;
         }
 
         Ok(())
@@ -664,9 +669,66 @@ impl MongoClient {
         Ok(())
     }
 
-    pub async fn insert_tickers_total_minted_at_block_height(
+    pub async fn load_user_balances_with_retry(&self) -> Result<Option<Vec<Document>>, String> {
+        let retries = consts::MONGO_RETRIES;
+        for attempt in 0..=retries {
+            match self.load_user_balances().await {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    log::warn!(
+                        "Attempt {}/{} failed with error: {}. Retrying...",
+                        attempt + 1,
+                        retries,
+                        e,
+                    );
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            }
+        }
+        Err(format!(
+            "Failed to load user balance entries after {} attempts",
+            retries
+        ))
+    }
+
+    pub async fn load_user_balances(&self) -> Result<Option<Vec<Document>>, String> {
+        let db = self.client.database(&self.db_name);
+        let collection = db.collection::<bson::Document>(consts::COLLECTION_USER_BALANCES);
+
+        // Check if the collection has any documents
+        let doc_count = collection
+            .estimated_document_count(None)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // If no documents, return None
+        if doc_count == 0 {
+            return Ok(None);
+        }
+
+        let mut cursor = collection
+            .find(None, None)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let mut user_balances = Vec::new();
+
+        while let Some(result) = cursor.next().await {
+            match result {
+                Ok(document) => {
+                    user_balances.push(document);
+                }
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+
+        Ok(Some(user_balances))
+    }
+
+    pub async fn insert_tickers_total_minted_and_user_balances_at_block_height(
         &self,
         block_height: i64,
+        user_balance_docs: &Vec<Document>,
     ) -> anyhow::Result<()> {
         // Get all tickers
         let cursor = self
@@ -688,11 +750,15 @@ impl MongoClient {
             ticker_docs.push(ticker_doc);
         }
 
+        // Prepare the user balances array for the new document
+        let user_balances = user_balance_docs.clone();
+
         // Build the new document
         let new_ticker_total_minted_at_block_height = doc! {
             "block_height": block_height,
             "created_at": Bson::DateTime(DateTime::now()),
             "tickers": ticker_docs,
+            "user_balances": user_balances,
         };
 
         // Insert the new document into the blocks_completed collection
