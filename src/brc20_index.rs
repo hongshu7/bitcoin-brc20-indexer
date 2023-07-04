@@ -277,40 +277,15 @@ pub async fn index_brc20(
                             }
                         }
 
-                        // Bulk write mints to mongodb
-                        if !mint_documents.is_empty() {
-                            let start = Instant::now();
-                            mongo_client
-                                .insert_many_with_retries(consts::COLLECTION_MINTS, mint_documents)
-                                .await?;
-                            log::warn!("Mints inserted after block: {:?}", start.elapsed());
-                        }
-
-                        // Bulk write transfers to mongodb
-                        if !transfer_documents.is_empty() {
-                            let start = Instant::now();
-                            mongo_client
-                                .insert_many_with_retries(
-                                    consts::COLLECTION_TRANSFERS,
-                                    transfer_documents,
-                                )
-                                .await?;
-
-                            log::warn!("Transfers inserted after block: {:?}", start.elapsed());
-                        }
-
-                        // Bulk write deploys to mongodb
-                        if !deploy_documents.is_empty() {
-                            let start = Instant::now();
-                            mongo_client
-                                .insert_many_with_retries(
-                                    consts::COLLECTION_DEPLOYS,
-                                    deploy_documents,
-                                )
-                                .await?;
-
-                            log::warn!("Deploys inserted after block: {:?}", start.elapsed());
-                        }
+                        insert_documents_to_mongo_after_each_block(
+                            mongo_client,
+                            mint_documents,
+                            transfer_documents,
+                            deploy_documents,
+                            invalid_brc20_documents,
+                            user_balance_entry_documents,
+                        )
+                        .await?;
 
                         // convert tickers hashmap to vec<Document>
                         let tickers: Vec<Document> =
@@ -338,35 +313,6 @@ pub async fn index_brc20(
                             }
 
                             log::warn!("Tickers updated after block: {:?}", start.elapsed());
-                        }
-
-                        // Bulk write user balance entries to mongodb
-                        if !user_balance_entry_documents.is_empty() {
-                            let start = Instant::now();
-                            mongo_client
-                                .insert_many_with_retries(
-                                    consts::COLLECTION_USER_BALANCE_ENTRY,
-                                    user_balance_entry_documents,
-                                )
-                                .await?;
-
-                            log::warn!(
-                                "User Balance Entries inserted after block: {:?}",
-                                start.elapsed()
-                            );
-                        }
-
-                        // Bulk write invalid brc20 documents to mongodb
-                        if !invalid_brc20_documents.is_empty() {
-                            let start = Instant::now();
-                            mongo_client
-                                .insert_many_with_retries(
-                                    consts::COLLECTION_INVALIDS,
-                                    invalid_brc20_documents,
-                                )
-                                .await?;
-
-                            log::warn!("Invalids inserted after block: {:?}", start.elapsed());
                         }
 
                         let start = Instant::now();
@@ -598,6 +544,82 @@ pub async fn check_for_transfer_send(
             "Amount transferred: {}, to: {}",
             amount,
             receiver_address.to_string()
+        );
+    }
+
+    Ok(())
+}
+
+/// Inserts different types of documents to MongoDB in their respective collections.
+///
+/// # Arguments
+///
+/// * `mongo_client` - A reference to the MongoDB client used to interact with the database.
+/// * `mint_documents` - A vector of mint documents to be inserted into MongoDB.
+/// * `transfer_documents` - A vector of transfer documents to be inserted into MongoDB.
+/// * `deploy_documents` - A vector of deploy documents to be inserted into MongoDB.
+/// * `invalid_brc20_documents` - A vector of invalid BRC20 documents to be inserted into MongoDB.
+/// * `user_balance_entry_documents` - A vector of user balance entry documents to be inserted into MongoDB.
+///
+/// # Errors
+///
+/// This function will return an error if the insertion of any type of documents fails.
+pub async fn insert_documents_to_mongo_after_each_block(
+    mongo_client: &MongoClient,
+    mint_documents: Vec<Document>,
+    transfer_documents: Vec<Document>,
+    deploy_documents: Vec<Document>,
+    invalid_brc20_documents: Vec<Document>,
+    user_balance_entry_documents: Vec<Document>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // If there are mint documents, insert them into the mints collection
+    if !mint_documents.is_empty() {
+        let start = Instant::now();
+        mongo_client
+            .insert_many_with_retries(consts::COLLECTION_MINTS, mint_documents)
+            .await?;
+        log::warn!("Mints inserted after block: {:?}", start.elapsed());
+    }
+
+    // If there are transfer documents, insert them into the transfers collection
+    if !transfer_documents.is_empty() {
+        let start = Instant::now();
+        mongo_client
+            .insert_many_with_retries(consts::COLLECTION_TRANSFERS, transfer_documents)
+            .await?;
+        log::warn!("Transfers inserted after block: {:?}", start.elapsed());
+    }
+
+    // If there are deploy documents, insert them into the deploys collection
+    if !deploy_documents.is_empty() {
+        let start = Instant::now();
+        mongo_client
+            .insert_many_with_retries(consts::COLLECTION_DEPLOYS, deploy_documents)
+            .await?;
+        log::warn!("Deploys inserted after block: {:?}", start.elapsed());
+    }
+
+    // If there are invalid BRC20 documents, insert them into the invalids collection
+    if !invalid_brc20_documents.is_empty() {
+        let start = Instant::now();
+        mongo_client
+            .insert_many_with_retries(consts::COLLECTION_INVALIDS, invalid_brc20_documents)
+            .await?;
+        log::warn!("Invalids inserted after block: {:?}", start.elapsed());
+    }
+
+    // If there are user balance entry documents, insert them into the user balance entry collection
+    if !user_balance_entry_documents.is_empty() {
+        let start = Instant::now();
+        mongo_client
+            .insert_many_with_retries(
+                consts::COLLECTION_USER_BALANCE_ENTRY,
+                user_balance_entry_documents,
+            )
+            .await?;
+        log::warn!(
+            "User Balance Entries inserted after block: {:?}",
+            start.elapsed()
         );
     }
 

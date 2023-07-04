@@ -11,7 +11,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 
 // create active transfer struct
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Brc20ActiveTransfer {
     pub tx_id: String,
     pub vout: i64,
@@ -127,7 +127,7 @@ impl Brc20Transfer {
 
             // check if user has enough balance to transfer
             if available_balance >= transfer_amount {
-                println!("VALID: Transfer inscription added. From: {:#?}", self.from);
+                info!("VALID: Transfer inscription added. From: {:#?}", self.from);
                 self.is_valid = true;
 
                 // insert user balance entry
