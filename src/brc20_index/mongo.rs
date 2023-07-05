@@ -377,6 +377,8 @@ impl MongoClient {
             None => return Err(anyhow::anyhow!("Failed to extract user balances")),
         };
 
+        let mut collected_balances: Vec<Document> = Vec::new();
+
         // Iterate over the extracted user balances and use them to rebuild the user balance data
         for user_balance_doc in user_balance_docs {
             // Get the necessary fields from the document
@@ -395,10 +397,12 @@ impl MongoClient {
                 "overall_balance": overall_balance,
             };
 
-            // Insert the new document into the MongoDB collection
-            self.insert_document(consts::COLLECTION_USER_BALANCES, new_user_balance)
-                .await?;
+            collected_balances.push(new_user_balance);
         }
+
+        // Insert the new user balances into the MongoDB collection
+        self.insert_many_with_retries(consts::COLLECTION_USER_BALANCES, collected_balances)
+            .await?;
 
         Ok(())
     }
