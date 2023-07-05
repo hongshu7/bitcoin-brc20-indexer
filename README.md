@@ -30,11 +30,11 @@ $ sudo docker build -t gcr.io/pineappleworkshop/omnisat-indexer-rs-mongo-indexin
 ```
 ## Docker Run in background
 ```bash
-$ sudo docker run -d --env-file .env gcr.io/pineappleworkshop/omnisat-indexer-rs-mongo-indexing:0.0.1
+$ sudo docker run -d --env-file .env --restart always gcr.io/pineappleworkshop/omnisat-indexer-rs-mongo-indexing:0.0.1
 ```
 ## See logs remotely:
 ```bash
-$ gcloud compute ssh indexer-omnisat-rs --zone us-central1-c --project pineappleworkshop --command 'sudo docker logs -f <DOCKER-RUNNING-CONTAINER-ID>'
+$ gcloud compute ssh indexer-omnisat-rs --zone us-central1-c --project pineappleworkshop --command 'sudo docker logs -f 168e4236429c'
 ```
 
 ### getting started
