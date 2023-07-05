@@ -1,3 +1,7 @@
+use crate::brc20_index::utils::{
+    update_receiver_balance_document, update_sender_user_balance_document,
+};
+
 use self::{
     deploy::handle_deploy_operation,
     mint::handle_mint_operation,
@@ -106,7 +110,7 @@ pub async fn index_brc20(
                                     // log raw brc20 data
                                     let pretty_json =
                                         serde_json::to_string(&inscription).unwrap_or_default();
-                                    log::debug!("Raw Brc-20 data: {}", pretty_json);
+                                    log::info!("Raw Brc-20 data: {}", pretty_json);
 
                                     // get owner address, inscription is first satoshi of first output
                                     let owner = match get_owner_of_vout(&raw_tx, 0) {
@@ -153,7 +157,6 @@ pub async fn index_brc20(
                                                 inscription,
                                                 &raw_tx,
                                                 &mut tickers,
-                                                &mut user_balance_docs,
                                                 &mut invalid_brc20_documents,
                                             )
                                             .await
@@ -164,6 +167,20 @@ pub async fn index_brc20(
                                                         mint_documents.push(mint.to_document());
                                                         user_balance_entry_documents
                                                             .push(user_balance_entry.to_document());
+
+                                                        // Update user balance docs
+                                                        match update_receiver_balance_document(
+                                                            &mut user_balance_docs,
+                                                            &user_balance_entry,
+                                                        ) {
+                                                            Ok(_) => {}
+                                                            Err(e) => {
+                                                                error!(
+                                                                    "Error updating user balance docs: {:?}",
+                                                                    e
+                                                                );
+                                                            }
+                                                        }
                                                     }
                                                 }
                                                 Err(e) => {
@@ -522,19 +539,10 @@ pub async fn check_for_transfer_send(
         .await?;
 
         // Update user available and transferable balance for the sender in MongoDB
-        mongo_client
-            .update_sender_user_balance_document(&from, amount, &tick, user_balance_docs)
-            .await?;
+        update_sender_user_balance_document(user_balance_docs, &user_entry_from)?;
 
         // Update user overall balance for the receiver in MongoDB
-        mongo_client
-            .update_receiver_balance_document(
-                &receiver_address.to_string(),
-                amount,
-                &tick,
-                user_balance_docs,
-            )
-            .await?;
+        update_receiver_balance_document(user_balance_docs, &user_entry_to)?;
 
         info!(
             "Transfer inscription found for txid: {}, vout: {}",

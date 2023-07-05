@@ -110,7 +110,11 @@ impl Brc20Transfer {
         }
 
         // get the user balance from the user_balance_docs vector
-        let user_balance_from = get_user_balance(user_balance_docs, &from, ticker_symbol);
+        // let user_balance_from = get_user_balance(user_balance_docs, &from, ticker_symbol);
+        let user_balance_from = user_balance_docs.iter_mut().find(|doc| {
+            doc.get_str("address").map_or(false, |a| a == from)
+                && doc.get_str("tick").map_or(false, |t| t == ticker_symbol)
+        });
 
         if let Some(user_balance) = user_balance_from {
             let available_balance = mongo_client
@@ -141,15 +145,29 @@ impl Brc20Transfer {
                     )
                     .await?;
 
-                // Update the user balance document in MongoDB
-                mongo_client
-                    .update_transfer_inscriber_user_balance_document(
-                        &self.from.to_string(),
-                        transfer_amount,
-                        ticker_symbol,
-                        user_balance_docs,
-                    )
-                    .await?;
+                // Get the available balance and transferable balance values
+                let available_balance = user_balance
+                    .get(consts::AVAILABLE_BALANCE)
+                    .and_then(Bson::as_f64)
+                    .unwrap_or_default();
+                let transferable_balance = user_balance
+                    .get(consts::TRANSFERABLE_BALANCE)
+                    .and_then(Bson::as_f64)
+                    .unwrap_or_default();
+
+                // Update the values
+                let updated_available_balance = available_balance - transfer_amount;
+                let updated_transferable_balance = transferable_balance + transfer_amount;
+
+                // Update the document
+                user_balance.insert(
+                    consts::AVAILABLE_BALANCE.to_string(),
+                    Bson::Double(updated_available_balance),
+                );
+                user_balance.insert(
+                    consts::TRANSFERABLE_BALANCE.to_string(),
+                    Bson::Double(updated_transferable_balance),
+                );
 
                 // Create new active transfer when inscription is valid
                 let active_transfer =
@@ -234,17 +252,6 @@ pub async fn handle_transfer_operation(
     }
 
     Ok((validated_transfer_tx, user_balance_entry))
-}
-
-pub fn get_user_balance<'a>(
-    user_balance_docs: &'a Vec<Document>,
-    address: &'a String,
-    ticker_symbol: &'a String,
-) -> Option<&'a Document> {
-    user_balance_docs.iter().find(|doc| {
-        doc.get_str("address").map_or(false, |a| a == address)
-            && doc.get_str("tick").map_or(false, |t| t == ticker_symbol)
-    })
 }
 
 impl ToDocument for Brc20Transfer {

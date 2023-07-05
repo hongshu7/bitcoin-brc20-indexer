@@ -196,52 +196,19 @@ async fn update_ticker_total_minted(
     Ok(())
 }
 
-pub async fn pre_validate_mint(
-    mongo_client: &MongoClient,
-    block_height: u32,
-    tx_height: u32,
-    owner: Address,
-    inscription: Brc20Inscription,
-    raw_tx: &GetRawTransactionResult,
-    tickers: &mut HashMap<String, Document>,
-    invalid_brc20_docs: &mut Vec<Document>,
-) -> Result<Brc20Mint, Box<dyn std::error::Error>> {
-    // Try to get the ticker from the hashmap if not, then mongodb
-    let ticker_doc_opt = get_ticker(tickers, &inscription.tick.to_lowercase(), mongo_client).await;
-
-    // Create a new Brc20Mint instance
-    let new_mint = Brc20Mint::new(&raw_tx, inscription, block_height, tx_height, owner);
-    new_mint
-        .validate_mint(ticker_doc_opt, invalid_brc20_docs)
-        .await
-}
-
 pub async fn update_balances_and_ticker(
     mongo_client: &MongoClient,
     validated_mint_tx: &Brc20Mint,
     tickers: &mut HashMap<String, Document>,
-    user_balance_docs: &mut Vec<Document>,
 ) -> Result<UserBalanceEntry, Box<dyn std::error::Error>> {
-    if validated_mint_tx.is_valid() {
-        // Update user overall balance and available for the receiver
-        mongo_client
-            .update_receiver_balance_document(
-                &validated_mint_tx.to.to_string(),
-                validated_mint_tx.amt,
-                &validated_mint_tx.inscription.tick.to_lowercase(),
-                user_balance_docs,
-            )
-            .await?;
-
-        // Update total minted tokens for this ticker in MongoDB and in-memory hashmap
-        update_ticker_total_minted(
-            &validated_mint_tx.inscription.tick.to_lowercase(),
-            validated_mint_tx.amt,
-            tickers,
-            mongo_client,
-        )
-        .await?;
-    }
+    // Update total minted tokens for this ticker in MongoDB and in-memory hashmap
+    update_ticker_total_minted(
+        &validated_mint_tx.inscription.tick.to_lowercase(),
+        validated_mint_tx.amt,
+        tickers,
+        mongo_client,
+    )
+    .await?;
 
     // return user balance entry
     Ok(mongo_client
@@ -263,20 +230,16 @@ pub async fn handle_mint_operation(
     inscription: Brc20Inscription,
     raw_tx: &GetRawTransactionResult,
     tickers: &mut HashMap<String, Document>,
-    user_balance_docs: &mut Vec<Document>,
     invalid_brc20_docs: &mut Vec<Document>,
 ) -> Result<(Brc20Mint, UserBalanceEntry), Box<dyn std::error::Error>> {
-    let validated_mint_tx = pre_validate_mint(
-        mongo_client,
-        block_height,
-        tx_height,
-        owner,
-        inscription,
-        raw_tx,
-        tickers,
-        invalid_brc20_docs,
-    )
-    .await?;
+    // Try to get the ticker from the hashmap if not, then mongodb
+    let ticker_doc_opt = get_ticker(tickers, &inscription.tick.to_lowercase(), mongo_client).await;
+
+    // Create a new Brc20Mint instance
+    let new_mint = Brc20Mint::new(&raw_tx, inscription, block_height, tx_height, owner);
+    let validated_mint_tx = new_mint
+        .validate_mint(ticker_doc_opt, invalid_brc20_docs)
+        .await?;
 
     let mut user_balance_entry = UserBalanceEntry::default();
 
@@ -289,13 +252,8 @@ pub async fn handle_mint_operation(
         info!("TO Address: {:?}", validated_mint_tx.to);
 
         // update_balances_and_ticker
-        user_balance_entry = update_balances_and_ticker(
-            mongo_client,
-            &validated_mint_tx,
-            tickers,
-            user_balance_docs,
-        )
-        .await?;
+        user_balance_entry =
+            update_balances_and_ticker(mongo_client, &validated_mint_tx, tickers).await?;
     }
 
     Ok((validated_mint_tx, user_balance_entry))
