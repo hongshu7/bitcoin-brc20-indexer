@@ -357,7 +357,9 @@ impl MongoClient {
     }
 
     pub async fn rebuild_user_balances(&self, block_height: i64) -> anyhow::Result<()> {
-        let doc_option = self.get_ticker_totals_by_block_height(block_height).await?;
+        let doc_option = self
+            .get_ticker_totals_and_user_balances_by_block_height(block_height)
+            .await?;
 
         // Extract the user_balances field from the document
         let user_balance_docs = match doc_option {
@@ -538,67 +540,67 @@ impl MongoClient {
         Ok(())
     }
 
-    pub async fn load_user_balances_with_retry(
-        &self,
-    ) -> Result<HashMap<(String, String), Document>, String> {
-        let retries = consts::MONGO_RETRIES;
-        for attempt in 0..=retries {
-            match self.load_user_balances().await {
-                Ok(result) => return Ok(result),
-                Err(e) => {
-                    log::warn!(
-                        "Attempt {}/{} failed with error: {}. Retrying...",
-                        attempt + 1,
-                        retries,
-                        e,
-                    );
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                }
-            }
-        }
-        Err(format!(
-            "Failed to load user balances after {} attempts",
-            retries
-        ))
-    }
+    // pub async fn load_user_balances_with_retry(
+    //     &self,
+    // ) -> Result<HashMap<(String, String), Document>, String> {
+    //     let retries = consts::MONGO_RETRIES;
+    //     for attempt in 0..=retries {
+    //         match self.load_user_balances().await {
+    //             Ok(result) => return Ok(result),
+    //             Err(e) => {
+    //                 log::warn!(
+    //                     "Attempt {}/{} failed with error: {}. Retrying...",
+    //                     attempt + 1,
+    //                     retries,
+    //                     e,
+    //                 );
+    //                 tokio::time::sleep(Duration::from_secs(2)).await;
+    //             }
+    //         }
+    //     }
+    //     Err(format!(
+    //         "Failed to load user balances after {} attempts",
+    //         retries
+    //     ))
+    // }
 
-    pub async fn load_user_balances(&self) -> Result<HashMap<(String, String), Document>, String> {
-        let db = self.client.database(&self.db_name);
-        let collection = db.collection::<bson::Document>(consts::COLLECTION_USER_BALANCES);
+    // pub async fn load_user_balances(&self) -> Result<HashMap<(String, String), Document>, String> {
+    //     let db = self.client.database(&self.db_name);
+    //     let collection = db.collection::<bson::Document>(consts::COLLECTION_USER_BALANCES);
 
-        // Check if the collection has any documents
-        let doc_count = collection
-            .estimated_document_count(None)
-            .await
-            .map_err(|e| e.to_string())?;
+    //     // Check if the collection has any documents
+    //     let doc_count = collection
+    //         .estimated_document_count(None)
+    //         .await
+    //         .map_err(|e| e.to_string())?;
 
-        // If no documents, return an empty hashmap
-        if doc_count == 0 {
-            return Ok(HashMap::new());
-        }
+    //     // If no documents, return an empty hashmap
+    //     if doc_count == 0 {
+    //         return Ok(HashMap::new());
+    //     }
 
-        let mut cursor = collection
-            .find(None, None)
-            .await
-            .map_err(|e| e.to_string())?;
+    //     let mut cursor = collection
+    //         .find(None, None)
+    //         .await
+    //         .map_err(|e| e.to_string())?;
 
-        let mut user_balances: HashMap<(String, String), Document> = HashMap::new();
+    //     let mut user_balances: HashMap<(String, String), Document> = HashMap::new();
 
-        while let Some(result) = cursor.next().await {
-            match result {
-                Ok(document) => {
-                    if let (Ok(address), Ok(tick)) =
-                        (document.get_str("address"), document.get_str("tick"))
-                    {
-                        user_balances.insert((address.to_string(), tick.to_string()), document);
-                    }
-                }
-                Err(e) => return Err(e.to_string()),
-            }
-        }
+    //     while let Some(result) = cursor.next().await {
+    //         match result {
+    //             Ok(document) => {
+    //                 if let (Ok(address), Ok(tick)) =
+    //                     (document.get_str("address"), document.get_str("tick"))
+    //                 {
+    //                     user_balances.insert((address.to_string(), tick.to_string()), document);
+    //                 }
+    //             }
+    //             Err(e) => return Err(e.to_string()),
+    //         }
+    //     }
 
-        Ok(user_balances)
-    }
+    //     Ok(user_balances)
+    // }
 
     pub async fn insert_tickers_total_minted_and_user_balances_at_block_height(
         &self,
@@ -647,7 +649,7 @@ impl MongoClient {
     }
 
     // Function to get ticker totals by block height
-    pub async fn get_ticker_totals_by_block_height(
+    pub async fn get_ticker_totals_and_user_balances_by_block_height(
         &self,
         block_height: i64,
     ) -> Result<Option<Document>, anyhow::Error> {
@@ -667,7 +669,10 @@ impl MongoClient {
     // Function to update ticker totals
     pub async fn update_ticker_totals(&self, block_height: i64) -> Result<(), anyhow::Error> {
         // First, get the document for the given block height
-        let ticker_totals_doc = match self.get_ticker_totals_by_block_height(block_height).await? {
+        let ticker_totals_doc = match self
+            .get_ticker_totals_and_user_balances_by_block_height(block_height)
+            .await?
+        {
             Some(doc) => doc,
             None => {
                 return Err(anyhow::Error::msg(format!(
@@ -701,6 +706,46 @@ impl MongoClient {
         }
 
         Ok(())
+    }
+
+    pub async fn get_user_balances_by_block_height(
+        &self,
+        block_height: i64,
+    ) -> Result<HashMap<(String, String), Document>, anyhow::Error> {
+        // Find the document based on the block height
+        let filter_doc = doc! {"block_height": block_height};
+        let document = self
+            .get_document_by_filter(consts::COLLECTION_TOTAL_MINTED_AT_BLOCK_HEIGHT, filter_doc)
+            .await?
+            .ok_or_else(|| {
+                anyhow::anyhow!("Document not found for block height: {}", block_height)
+            })?;
+
+        // Get the user balances array from the document
+        let user_balances_array = document.get_array("user_balances").or_else(|_| {
+            Err(anyhow::anyhow!(
+                "'user_balances' array not found in the document"
+            ))
+        })?;
+
+        // Convert the user balances array into a hashmap
+        let mut user_balances = HashMap::new();
+        for user_balance_doc in user_balances_array
+            .iter()
+            .filter_map(|doc| doc.as_document())
+        {
+            if let (Ok(address), Ok(tick)) = (
+                user_balance_doc.get_str("address"),
+                user_balance_doc.get_str("tick"),
+            ) {
+                user_balances.insert(
+                    (address.to_string(), tick.to_string()),
+                    user_balance_doc.clone(),
+                );
+            }
+        }
+
+        Ok(user_balances)
     }
 
     pub async fn create_indexes(&self) -> Result<(), Box<dyn std::error::Error>> {

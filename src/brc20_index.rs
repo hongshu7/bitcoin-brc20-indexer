@@ -62,15 +62,17 @@ pub async fn index_brc20(
                         }
 
                         let start = Instant::now();
-                        // get all user balances from mongo
-                        let mut user_balance_docs =
-                            match mongo_client.load_user_balances_with_retry().await {
-                                Ok(docs) => docs,
-                                Err(e) => {
-                                    error!("Failed to load user balances: {:?}", e);
-                                    HashMap::new()
-                                }
-                            };
+
+                        let mut user_balance_docs = match mongo_client
+                            .get_user_balances_by_block_height((current_block_height - 1).into())
+                            .await
+                        {
+                            Ok(docs) => docs,
+                            Err(e) => {
+                                error!("Failed to get user balances by block height: {:?}", e);
+                                HashMap::new()
+                            }
+                        };
 
                         warn!("User Balances loaded: {:?}", start.elapsed());
 
