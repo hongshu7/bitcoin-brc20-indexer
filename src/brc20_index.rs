@@ -16,7 +16,7 @@ use bitcoincore_rpc::bitcoincore_rpc_json::{
     GetRawTransactionResultVoutScriptPubKey,
 };
 use bitcoincore_rpc::{self, Client, RpcApi};
-use log::{error, info};
+use log::{error, info, warn};
 use mongodb::bson::{doc, Document};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -61,18 +61,18 @@ pub async fn index_brc20(
                             active_transfers_opt = Some(HashMap::new());
                         }
 
+                        let start = Instant::now();
                         // get all user balances from mongo
                         let mut user_balance_docs =
                             match mongo_client.load_user_balances_with_retry().await {
-                                Ok(docs) => match docs {
-                                    Some(docs) => docs,
-                                    None => Vec::new(),
-                                },
+                                Ok(docs) => docs,
                                 Err(e) => {
                                     error!("Failed to load user balances: {:?}", e);
-                                    Vec::new()
+                                    HashMap::new()
                                 }
                             };
+
+                        warn!("User Balances loaded: {:?}", start.elapsed());
 
                         // Vectors for mongo bulk writes
                         let mut mint_documents = Vec::new();
@@ -81,6 +81,9 @@ pub async fn index_brc20(
                         let mut invalid_brc20_documents = Vec::new();
                         let mut user_balance_entry_documents = Vec::new();
                         let mut tickers: HashMap<String, Document> = HashMap::new();
+
+                        // time to process the block
+                        let process_block_start_time = Instant::now();
 
                         let mut tx_height = 0u32;
                         for transaction in block.txdata {
@@ -110,7 +113,7 @@ pub async fn index_brc20(
                                     // log raw brc20 data
                                     let pretty_json =
                                         serde_json::to_string(&inscription).unwrap_or_default();
-                                    log::info!("Raw Brc-20 data: {}", pretty_json);
+                                    info!("Raw Brc-20 data: {}", pretty_json);
 
                                     // get owner address, inscription is first satoshi of first output
                                     let owner = match get_owner_of_vout(&raw_tx, 0) {
@@ -262,6 +265,12 @@ pub async fn index_brc20(
                             tx_height += 1;
                         }
 
+                        // time to process the block
+                        warn!(
+                            "Block Transactions Processed in: {:?}",
+                            process_block_start_time.elapsed()
+                        );
+
                         // Bulk write the updated and new user balance documents back to MongoDB
                         if !user_balance_docs.is_empty() {
                             let start = Instant::now(); // time the process
@@ -271,19 +280,16 @@ pub async fn index_brc20(
                                 .drop_collection(consts::COLLECTION_USER_BALANCES)
                                 .await?;
 
-                            log::warn!("User Balances Deleted after block: {:?}", start.elapsed());
+                            warn!("User Balances Deleted after block: {:?}", start.elapsed());
 
                             let start = Instant::now();
                             // Bulk write user balance documents to mongodb
                             match mongo_client
-                                .insert_many_with_retries(
-                                    consts::COLLECTION_USER_BALANCES,
-                                    user_balance_docs.clone(),
-                                )
+                                .insert_user_balances_with_retries(user_balance_docs.clone())
                                 .await
                             {
                                 Ok(_) => {
-                                    info!(
+                                    warn!(
                                         "User Balances inserted after block: {:?}",
                                         start.elapsed()
                                     )
@@ -329,7 +335,7 @@ pub async fn index_brc20(
                                     .await?;
                             }
 
-                            log::warn!("Tickers updated after block: {:?}", start.elapsed());
+                            warn!("Tickers updated after block: {:?}", start.elapsed());
                         }
 
                         let start = Instant::now();
@@ -339,7 +345,7 @@ pub async fn index_brc20(
                             .drop_collection(consts::COLLECTION_BRC20_ACTIVE_TRANSFERS)
                             .await?;
 
-                        log::warn!(
+                        warn!(
                             "Active Transfers Deleted after block: {:?}",
                             start.elapsed()
                         );
@@ -352,7 +358,7 @@ pub async fn index_brc20(
                                     .insert_active_transfers_to_mongodb(active_transfers)
                                     .await?;
 
-                                log::warn!(
+                                warn!(
                                     "Active Transfers inserted after block: {:?}",
                                     start.elapsed()
                                 );
@@ -369,7 +375,7 @@ pub async fn index_brc20(
                             )
                             .await?;
 
-                        log::warn!(
+                        warn!(
                             "Tickers and User Balances inserted after block: {:?}",
                             start.elapsed()
                         );
@@ -411,7 +417,7 @@ pub async fn check_for_transfer_send(
     active_transfers: &mut HashMap<(String, i64), Brc20ActiveTransfer>,
     transfer_documents: &mut Vec<Document>,
     user_balance_entry_documents: &mut Vec<Document>,
-    user_balance_docs: &mut Vec<Document>,
+    user_balances: &mut HashMap<(String, String), Document>,
 ) -> Result<(), anyhow::Error> {
     let transaction = raw_tx_info.transaction()?;
 
@@ -539,10 +545,10 @@ pub async fn check_for_transfer_send(
         .await?;
 
         // Update user available and transferable balance for the sender in MongoDB
-        update_sender_user_balance_document(user_balance_docs, &user_entry_from)?;
+        update_sender_user_balance_document(user_balances, &user_entry_from)?;
 
         // Update user overall balance for the receiver in MongoDB
-        update_receiver_balance_document(user_balance_docs, &user_entry_to)?;
+        update_receiver_balance_document(user_balances, &user_entry_to)?;
 
         info!(
             "Transfer inscription found for txid: {}, vout: {}",
@@ -586,7 +592,7 @@ pub async fn insert_documents_to_mongo_after_each_block(
         mongo_client
             .insert_many_with_retries(consts::COLLECTION_MINTS, mint_documents)
             .await?;
-        log::warn!("Mints inserted after block: {:?}", start.elapsed());
+        warn!("Mints inserted after block: {:?}", start.elapsed());
     }
 
     // If there are transfer documents, insert them into the transfers collection
@@ -595,7 +601,7 @@ pub async fn insert_documents_to_mongo_after_each_block(
         mongo_client
             .insert_many_with_retries(consts::COLLECTION_TRANSFERS, transfer_documents)
             .await?;
-        log::warn!("Transfers inserted after block: {:?}", start.elapsed());
+        warn!("Transfers inserted after block: {:?}", start.elapsed());
     }
 
     // If there are deploy documents, insert them into the deploys collection
@@ -604,7 +610,7 @@ pub async fn insert_documents_to_mongo_after_each_block(
         mongo_client
             .insert_many_with_retries(consts::COLLECTION_DEPLOYS, deploy_documents)
             .await?;
-        log::warn!("Deploys inserted after block: {:?}", start.elapsed());
+        warn!("Deploys inserted after block: {:?}", start.elapsed());
     }
 
     // If there are invalid BRC20 documents, insert them into the invalids collection
@@ -613,7 +619,7 @@ pub async fn insert_documents_to_mongo_after_each_block(
         mongo_client
             .insert_many_with_retries(consts::COLLECTION_INVALIDS, invalid_brc20_documents)
             .await?;
-        log::warn!("Invalids inserted after block: {:?}", start.elapsed());
+        warn!("Invalids inserted after block: {:?}", start.elapsed());
     }
 
     // If there are user balance entry documents, insert them into the user balance entry collection
@@ -625,7 +631,7 @@ pub async fn insert_documents_to_mongo_after_each_block(
                 user_balance_entry_documents,
             )
             .await?;
-        log::warn!(
+        warn!(
             "User Balance Entries inserted after block: {:?}",
             start.elapsed()
         );

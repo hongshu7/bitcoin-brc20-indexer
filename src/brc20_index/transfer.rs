@@ -84,7 +84,7 @@ impl Brc20Transfer {
         &mut self,
         mongo_client: &MongoClient,
         active_transfers: &mut Option<HashMap<(String, i64), Brc20ActiveTransfer>>,
-        user_balance_docs: &mut Vec<Document>,
+        user_balances: &mut HashMap<(String, String), Document>,
         invalid_brc20_docs: &mut Vec<Document>,
     ) -> Result<UserBalanceEntry, Box<dyn std::error::Error>> {
         let ticker_symbol = &self.inscription.tick.to_lowercase();
@@ -109,14 +109,10 @@ impl Brc20Transfer {
             )));
         }
 
-        // get the user balance from the user_balance_docs vector
-        // let user_balance_from = get_user_balance(user_balance_docs, &from, ticker_symbol);
-        let user_balance_from = user_balance_docs.iter_mut().find(|doc| {
-            doc.get_str("address").map_or(false, |a| a == from)
-                && doc.get_str("tick").map_or(false, |t| t == ticker_symbol)
-        });
+        // get the user balance from the user_balances hashmap
+        let user_balance_from = get_user_balance(user_balances, &from, ticker_symbol);
 
-        if let Some(user_balance) = user_balance_from {
+        if let Some(mut user_balance) = user_balance_from.cloned() {
             let available_balance = mongo_client
                 .get_double(&user_balance, "available_balance")
                 .unwrap_or_default();
@@ -168,6 +164,8 @@ impl Brc20Transfer {
                     consts::TRANSFERABLE_BALANCE.to_string(),
                     Bson::Double(updated_transferable_balance),
                 );
+
+                user_balances.insert((from.clone(), ticker_symbol.clone()), user_balance);
 
                 // Create new active transfer when inscription is valid
                 let active_transfer =
@@ -227,7 +225,7 @@ pub async fn handle_transfer_operation(
     raw_tx: &GetRawTransactionResult,
     sender: Address,
     active_transfers: &mut Option<HashMap<(String, i64), Brc20ActiveTransfer>>,
-    user_balance_docs: &mut Vec<Document>,
+    user_balances: &mut HashMap<(String, String), Document>,
     invalid_brc20_docs: &mut Vec<Document>,
 ) -> Result<(Brc20Transfer, UserBalanceEntry), Box<dyn std::error::Error>> {
     // Create a new transfer transaction
@@ -239,7 +237,7 @@ pub async fn handle_transfer_operation(
         .validate_inscribe_transfer(
             mongo_client,
             active_transfers,
-            user_balance_docs,
+            user_balances,
             invalid_brc20_docs,
         )
         .await?;
@@ -252,6 +250,14 @@ pub async fn handle_transfer_operation(
     }
 
     Ok((validated_transfer_tx, user_balance_entry))
+}
+
+pub fn get_user_balance<'a>(
+    user_balances: &'a HashMap<(String, String), Document>,
+    address: &'a String,
+    ticker_symbol: &'a String,
+) -> Option<&'a Document> {
+    user_balances.get(&(address.clone(), ticker_symbol.clone()))
 }
 
 impl ToDocument for Brc20Transfer {

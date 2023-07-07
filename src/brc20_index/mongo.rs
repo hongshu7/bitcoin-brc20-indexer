@@ -524,7 +524,23 @@ impl MongoClient {
         Ok(())
     }
 
-    pub async fn load_user_balances_with_retry(&self) -> Result<Option<Vec<Document>>, String> {
+    pub async fn insert_user_balances_with_retries(
+        &self,
+        user_balances: HashMap<(String, String), Document>,
+    ) -> Result<(), anyhow::Error> {
+        // Convert the hashmap values to a Vec<bson::Document>
+        let documents: Vec<bson::Document> = user_balances.values().cloned().collect();
+
+        // Insert the documents into the collection with retries
+        self.insert_many_with_retries(consts::COLLECTION_USER_BALANCES, documents)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn load_user_balances_with_retry(
+        &self,
+    ) -> Result<HashMap<(String, String), Document>, String> {
         let retries = consts::MONGO_RETRIES;
         for attempt in 0..=retries {
             match self.load_user_balances().await {
@@ -541,12 +557,12 @@ impl MongoClient {
             }
         }
         Err(format!(
-            "Failed to load user balance entries after {} attempts",
+            "Failed to load user balances after {} attempts",
             retries
         ))
     }
 
-    pub async fn load_user_balances(&self) -> Result<Option<Vec<Document>>, String> {
+    pub async fn load_user_balances(&self) -> Result<HashMap<(String, String), Document>, String> {
         let db = self.client.database(&self.db_name);
         let collection = db.collection::<bson::Document>(consts::COLLECTION_USER_BALANCES);
 
@@ -556,9 +572,9 @@ impl MongoClient {
             .await
             .map_err(|e| e.to_string())?;
 
-        // If no documents, return None
+        // If no documents, return an empty hashmap
         if doc_count == 0 {
-            return Ok(None);
+            return Ok(HashMap::new());
         }
 
         let mut cursor = collection
@@ -566,24 +582,28 @@ impl MongoClient {
             .await
             .map_err(|e| e.to_string())?;
 
-        let mut user_balances = Vec::new();
+        let mut user_balances: HashMap<(String, String), Document> = HashMap::new();
 
         while let Some(result) = cursor.next().await {
             match result {
                 Ok(document) => {
-                    user_balances.push(document);
+                    if let (Ok(address), Ok(tick)) =
+                        (document.get_str("address"), document.get_str("tick"))
+                    {
+                        user_balances.insert((address.to_string(), tick.to_string()), document);
+                    }
                 }
                 Err(e) => return Err(e.to_string()),
             }
         }
 
-        Ok(Some(user_balances))
+        Ok(user_balances)
     }
 
     pub async fn insert_tickers_total_minted_and_user_balances_at_block_height(
         &self,
         block_height: i64,
-        user_balance_docs: &Vec<Document>,
+        user_balances: &HashMap<(String, String), Document>,
     ) -> anyhow::Result<()> {
         // Get all tickers
         let cursor = self
@@ -606,18 +626,17 @@ impl MongoClient {
         }
 
         // Prepare the user balances array for the new document
-        let user_balances = user_balance_docs.clone();
+        let user_balances_docs: Vec<Document> = user_balances.values().cloned().collect();
 
         // Build the new document
         let new_ticker_total_minted_at_block_height = doc! {
             "block_height": block_height,
             "created_at": Bson::DateTime(DateTime::now()),
             "tickers": ticker_docs,
-            "user_balances": user_balances,
+            "user_balances": user_balances_docs,
         };
 
         // Insert the new document into the blocks_completed collection
-        // blocks_coll.insert_one(new_block_summary, None).await?;
         self.insert_document(
             consts::COLLECTION_TOTAL_MINTED_AT_BLOCK_HEIGHT,
             new_ticker_total_minted_at_block_height,

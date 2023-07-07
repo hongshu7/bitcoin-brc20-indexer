@@ -148,106 +148,96 @@ pub fn transaction_inputs_to_values(client: &Client, inputs: &[TxIn]) -> anyhow:
 }
 
 pub fn update_receiver_balance_document(
-    user_balance_docs: &mut Vec<Document>,
+    user_balance_docs: &mut HashMap<(String, String), Document>,
     user_balance_entry: &UserBalanceEntry,
 ) -> Result<(), anyhow::Error> {
-    // Find the user balance in the vector or create a new one
-    match user_balance_docs.iter_mut().find(|doc| {
-        match (doc.get_str("address"), doc.get_str("tick")) {
-            (Ok(address), Ok(ticker)) => {
-                address == user_balance_entry.address && ticker == user_balance_entry.tick
-            }
-            _ => false,
-        }
-    }) {
-        Some(user_balance) => {
-            // Update the existing document
-            // Get the overall and available balance values
-            let overall_balance = user_balance
-                .get(consts::OVERALL_BALANCE)
-                .and_then(Bson::as_f64)
-                .unwrap_or_default();
-            let available_balance = user_balance
-                .get(consts::AVAILABLE_BALANCE)
-                .and_then(Bson::as_f64)
-                .unwrap_or_default();
+    // Create the key from the address and ticker
+    let key = (
+        user_balance_entry.address.to_string(),
+        user_balance_entry.tick.clone(),
+    );
 
-            // Update the values
-            let updated_overall_balance = overall_balance + user_balance_entry.amt;
-            let updated_available_balance = available_balance + user_balance_entry.amt;
+    // Get the document from the hashmap or insert a new one if it doesn't exist
+    let user_balance = user_balance_docs.entry(key).or_insert_with(|| {
+        // If the UserBalance doesn't exist, create a new one with the given values
+        let new_balance = UserBalance {
+            address: user_balance_entry.address.to_string(),
+            tick: user_balance_entry.tick.clone(),
+            overall_balance: user_balance_entry.amt,
+            available_balance: user_balance_entry.amt,
+            transferable_balance: 0.0,
+        };
 
-            // Update the document
-            user_balance.insert(
-                consts::OVERALL_BALANCE.to_string(),
-                Bson::Double(updated_overall_balance),
-            );
-            user_balance.insert(
-                consts::AVAILABLE_BALANCE.to_string(),
-                Bson::Double(updated_available_balance),
-            );
-        }
-        None => {
-            // If the UserBalance doesn't exist, create a new one with the given values
-            let new_balance = UserBalance {
-                address: user_balance_entry.address.to_string(),
-                tick: user_balance_entry.tick.clone(),
-                overall_balance: user_balance_entry.amt,
-                available_balance: user_balance_entry.amt,
-                transferable_balance: 0.0,
-            };
+        // Convert the UserBalance to a Document
+        new_balance.to_document()
+    });
 
-            // Convert the UserBalance to a Document and add it to the vector
-            let new_balance_doc = new_balance.to_document();
-            user_balance_docs.push(new_balance_doc.clone());
-        }
-    };
+    // Update the existing document
+    // Get the overall and available balance values
+    let overall_balance = user_balance
+        .get(consts::OVERALL_BALANCE)
+        .and_then(Bson::as_f64)
+        .unwrap_or_default();
+    let available_balance = user_balance
+        .get(consts::AVAILABLE_BALANCE)
+        .and_then(Bson::as_f64)
+        .unwrap_or_default();
+
+    // Update the values
+    let updated_overall_balance = overall_balance + user_balance_entry.amt;
+    let updated_available_balance = available_balance + user_balance_entry.amt;
+
+    // Update the document
+    user_balance.insert(
+        consts::OVERALL_BALANCE.to_string(),
+        Bson::Double(updated_overall_balance),
+    );
+    user_balance.insert(
+        consts::AVAILABLE_BALANCE.to_string(),
+        Bson::Double(updated_available_balance),
+    );
 
     Ok(())
 }
 
-// This method will update the user balance document in MongoDB
 pub fn update_sender_user_balance_document(
-    user_balance_docs: &mut Vec<Document>,
+    user_balances: &mut HashMap<(String, String), Document>,
     user_balance_entry: &UserBalanceEntry,
 ) -> Result<(), anyhow::Error> {
-    // Find the user balance in the vector or create a new one
-    match user_balance_docs.iter_mut().find(|doc| {
-        match (doc.get_str("address"), doc.get_str("tick")) {
-            (Ok(address), Ok(ticker)) => {
-                address == user_balance_entry.address && ticker == user_balance_entry.tick
-            }
-            _ => false,
-        }
-    }) {
-        Some(user_balance) => {
-            // Get the overall balance and transferable balance values
-            let overall_balance = user_balance
-                .get(consts::OVERALL_BALANCE)
-                .and_then(Bson::as_f64)
-                .unwrap_or_default();
-            let transferable_balance = user_balance
-                .get(consts::TRANSFERABLE_BALANCE)
-                .and_then(Bson::as_f64)
-                .unwrap_or_default();
+    // Create the key from the address and ticker
+    let key = (
+        user_balance_entry.address.to_string(),
+        user_balance_entry.tick.clone(),
+    );
 
-            // Update the values
-            let updated_overall_balance = overall_balance - user_balance_entry.amt;
-            let updated_transferable_balance = transferable_balance - user_balance_entry.amt;
+    // Get the document from the hashmap or return an error if it doesn't exist
+    let user_balance = user_balances
+        .get_mut(&key)
+        .ok_or_else(|| anyhow::anyhow!("User balance document not found in memory"))?;
 
-            // Update the document
-            user_balance.insert(
-                consts::OVERALL_BALANCE.to_string(),
-                Bson::Double(updated_overall_balance),
-            );
-            user_balance.insert(
-                consts::TRANSFERABLE_BALANCE.to_string(),
-                Bson::Double(updated_transferable_balance),
-            );
-        }
-        None => {
-            return Err(anyhow::anyhow!("User balance document not found in memory"));
-        }
-    };
+    // Get the overall balance and transferable balance values
+    let overall_balance = user_balance
+        .get(consts::OVERALL_BALANCE)
+        .and_then(Bson::as_f64)
+        .unwrap_or_default();
+    let transferable_balance = user_balance
+        .get(consts::TRANSFERABLE_BALANCE)
+        .and_then(Bson::as_f64)
+        .unwrap_or_default();
+
+    // Update the values
+    let updated_overall_balance = overall_balance - user_balance_entry.amt;
+    let updated_transferable_balance = transferable_balance - user_balance_entry.amt;
+
+    // Update the document
+    user_balance.insert(
+        consts::OVERALL_BALANCE.to_string(),
+        Bson::Double(updated_overall_balance),
+    );
+    user_balance.insert(
+        consts::TRANSFERABLE_BALANCE.to_string(),
+        Bson::Double(updated_transferable_balance),
+    );
 
     Ok(())
 }
