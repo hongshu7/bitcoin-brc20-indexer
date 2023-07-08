@@ -6,7 +6,7 @@ use super::{
 };
 use bitcoin::{Address, Network, TxIn};
 use bitcoincore_rpc::{bitcoincore_rpc_json::GetRawTransactionResult, Client, RpcApi};
-use log::error;
+use log::{debug, error};
 use mongodb::bson::{Bson, Document};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -56,8 +56,8 @@ pub fn extract_and_process_witness_data(witness_data: String) -> Option<Brc20Ins
                         return Some(parsed_data);
                     }
                 }
-                Err(_e) => {
-                    // error!("JSON parsing failed: {:?}", e);
+                Err(e) => {
+                    debug!("JSON parsing failed: {:?}", e);
                 }
             }
         }

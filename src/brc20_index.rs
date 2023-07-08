@@ -10,7 +10,7 @@ use self::{
     user_balance::UserBalanceEntryType,
     utils::{extract_and_process_witness_data, get_owner_of_vout, get_witness_data_from_raw_tx},
 };
-use bitcoin::Address;
+use bitcoin::hashes::error;
 use bitcoincore_rpc::bitcoincore_rpc_json::{
     GetRawTransactionResult, GetRawTransactionResultVin, GetRawTransactionResultVout,
     GetRawTransactionResultVoutScriptPubKey,
@@ -316,7 +316,6 @@ pub async fn index_brc20(
                             }
                         }
 
-                        let start = Instant::now();
                         insert_documents_to_mongo_after_each_block(
                             mongo_client,
                             mint_documents,
@@ -326,10 +325,6 @@ pub async fn index_brc20(
                             user_balance_entry_documents,
                         )
                         .await?;
-                        warn!(
-                            "insert_documents_to_mongo_after_each_block: {:?}",
-                            start.elapsed()
-                        );
 
                         // convert tickers hashmap to vec<Document>
                         let tickers: Vec<Document> =
@@ -365,12 +360,10 @@ pub async fn index_brc20(
                         }
 
                         let start = Instant::now();
-
                         // drop mongodb collection right before inserting active transfers
                         mongo_client
                             .drop_collection(consts::COLLECTION_BRC20_ACTIVE_TRANSFERS)
                             .await?;
-
                         warn!(
                             "Active Transfers Deleted after block: {:?}",
                             start.elapsed()
@@ -509,25 +502,37 @@ pub async fn check_for_transfer_send(
 
             // then get the sum these input values
             let input_value_sum: u64 = input_values.iter().sum();
+            let total_output_value: u64 =
+                transaction.output.iter().map(|output| output.value).sum();
 
-            // Calculate the index of the output (vout) which is the recipient of the
-            // inscribed satoshi by finding the first output whose value is greater than
-            // the sum of all preceding input values. This is based on the
-            // ordinal theory that satoshis are processed in order
-            transaction
-                .output
-                .iter()
-                .scan(0, |acc, output| {
-                    *acc += output.value;
-                    Some(*acc)
-                })
-                .position(|value| value > input_value_sum)
-                .unwrap_or(transaction.output.len() - 1)
+            // If the sum of input values (up to the current input index) is greater than the total output value,
+            // assume that the sender is the receiver.
+            if input_value_sum > total_output_value {
+                std::usize::MAX // use MAX as a sentinel value
+            } else {
+                // Calculate the index of the output (vout) which is the recipient of the
+                // inscribed satoshi by finding the first output whose value is greater than
+                // the sum of all preceding input values. This is based on the ordinal theory that satoshis are processed in order.
+                transaction
+                    .output
+                    .iter()
+                    .scan(0, |acc, output| {
+                        *acc += output.value;
+                        Some(*acc)
+                    })
+                    .position(|value| value > input_value_sum)
+                    .unwrap_or(transaction.output.len() - 1)
+            }
         } else {
             0
         };
 
-        let receiver_address = get_owner_of_vout(&raw_tx_info, proper_vout)?;
+        let receiver_address = if proper_vout == std::usize::MAX {
+            error!("Transfer sent as Miner Fee. Balance sent back to sender.");
+            from.clone() // If sentinel value is present, use sender's address as receiver's address
+        } else {
+            get_owner_of_vout(&raw_tx_info, proper_vout)?.to_string()
+        };
 
         // Update user overall balance and available for the from address(sender)
         let user_entry_from = mongo_client
@@ -545,7 +550,7 @@ pub async fn check_for_transfer_send(
         // Update user overall balance and available for the to address(receiver)
         let user_entry_to = mongo_client
             .insert_user_balance_entry(
-                &receiver_address.to_string(),
+                &receiver_address,
                 amount,
                 &tick,
                 block_height,
@@ -579,11 +584,7 @@ pub async fn check_for_transfer_send(
             "Transfer inscription found for txid: {}, vout: {}",
             txid, vout
         );
-        info!(
-            "Amount transferred: {}, to: {}",
-            amount,
-            receiver_address.to_string()
-        );
+        info!("Amount transferred: {}, to: {}", amount, receiver_address);
     }
 
     Ok(())
@@ -772,7 +773,7 @@ pub async fn update_transfer_document(
     mongo_client: &MongoClient,
     tx_id: &str,
     vout: i64,
-    receiver_address: &Address,
+    receiver_address: &String,
     send_block_height: i64,
     send_tx_height: i64,
     send_tx: &GetRawTransactionResult,
@@ -783,13 +784,13 @@ pub async fn update_transfer_document(
         doc.get_str("tx.txid").ok() == Some(tx_id) && doc.get_i64("tx.vout").ok() == Some(vout)
     }) {
         // If it does, update it
-        transfer_doc.insert("to", receiver_address.to_string());
+        transfer_doc.insert("to", receiver_address);
         transfer_doc.insert("send_tx", send_tx.to_document());
     } else {
         // If it doesn't exist in the transfer_documents vector, update it in MongoDB
         let update_doc = doc! {
             "$set": {
-                "to": receiver_address.to_string(),
+                "to": receiver_address,
                 "send_tx": send_tx.to_document(),
                 "send_block_height": send_block_height,
                 "send_tx_height": send_tx_height,
