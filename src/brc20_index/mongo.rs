@@ -540,67 +540,67 @@ impl MongoClient {
         Ok(())
     }
 
-    // pub async fn load_user_balances_with_retry(
-    //     &self,
-    // ) -> Result<HashMap<(String, String), Document>, String> {
-    //     let retries = consts::MONGO_RETRIES;
-    //     for attempt in 0..=retries {
-    //         match self.load_user_balances().await {
-    //             Ok(result) => return Ok(result),
-    //             Err(e) => {
-    //                 log::warn!(
-    //                     "Attempt {}/{} failed with error: {}. Retrying...",
-    //                     attempt + 1,
-    //                     retries,
-    //                     e,
-    //                 );
-    //                 tokio::time::sleep(Duration::from_secs(2)).await;
-    //             }
-    //         }
-    //     }
-    //     Err(format!(
-    //         "Failed to load user balances after {} attempts",
-    //         retries
-    //     ))
-    // }
+    pub async fn load_user_balances_with_retry(
+        &self,
+    ) -> Result<HashMap<(String, String), Document>, String> {
+        let retries = consts::MONGO_RETRIES;
+        for attempt in 0..=retries {
+            match self.load_user_balances().await {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    log::warn!(
+                        "Attempt {}/{} failed with error: {}. Retrying...",
+                        attempt + 1,
+                        retries,
+                        e,
+                    );
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            }
+        }
+        Err(format!(
+            "Failed to load user balances after {} attempts",
+            retries
+        ))
+    }
 
-    // pub async fn load_user_balances(&self) -> Result<HashMap<(String, String), Document>, String> {
-    //     let db = self.client.database(&self.db_name);
-    //     let collection = db.collection::<bson::Document>(consts::COLLECTION_USER_BALANCES);
+    pub async fn load_user_balances(&self) -> Result<HashMap<(String, String), Document>, String> {
+        let db = self.client.database(&self.db_name);
+        let collection = db.collection::<bson::Document>(consts::COLLECTION_USER_BALANCES);
 
-    //     // Check if the collection has any documents
-    //     let doc_count = collection
-    //         .estimated_document_count(None)
-    //         .await
-    //         .map_err(|e| e.to_string())?;
+        // Check if the collection has any documents
+        let doc_count = collection
+            .estimated_document_count(None)
+            .await
+            .map_err(|e| e.to_string())?;
 
-    //     // If no documents, return an empty hashmap
-    //     if doc_count == 0 {
-    //         return Ok(HashMap::new());
-    //     }
+        // If no documents, return an empty hashmap
+        if doc_count == 0 {
+            return Ok(HashMap::new());
+        }
 
-    //     let mut cursor = collection
-    //         .find(None, None)
-    //         .await
-    //         .map_err(|e| e.to_string())?;
+        let mut cursor = collection
+            .find(None, None)
+            .await
+            .map_err(|e| e.to_string())?;
 
-    //     let mut user_balances: HashMap<(String, String), Document> = HashMap::new();
+        let mut user_balances: HashMap<(String, String), Document> = HashMap::new();
 
-    //     while let Some(result) = cursor.next().await {
-    //         match result {
-    //             Ok(document) => {
-    //                 if let (Ok(address), Ok(tick)) =
-    //                     (document.get_str("address"), document.get_str("tick"))
-    //                 {
-    //                     user_balances.insert((address.to_string(), tick.to_string()), document);
-    //                 }
-    //             }
-    //             Err(e) => return Err(e.to_string()),
-    //         }
-    //     }
+        while let Some(result) = cursor.next().await {
+            match result {
+                Ok(document) => {
+                    if let (Ok(address), Ok(tick)) =
+                        (document.get_str("address"), document.get_str("tick"))
+                    {
+                        user_balances.insert((address.to_string(), tick.to_string()), document);
+                    }
+                }
+                Err(e) => return Err(e.to_string()),
+            }
+        }
 
-    //     Ok(user_balances)
-    // }
+        Ok(user_balances)
+    }
 
     pub async fn insert_tickers_total_minted_and_user_balances_at_block_height(
         &self,
