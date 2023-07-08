@@ -7,7 +7,7 @@ use consulrs::{
     kv,
 };
 use dotenv::dotenv;
-use log::{error, info};
+use log::{error, info, warn};
 use serde_json;
 use serde_json::Value;
 use std::env;
@@ -145,7 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         start_block_height
     );
 
-    log::warn!("Retrieved starting block height: {:?}", start.elapsed());
+    warn!("Retrieved starting block height: {:?}", start.elapsed());
 
     info!("Deleting incomplete records...");
     let start = Instant::now();
@@ -170,7 +170,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .await?;
         }
 
-        log::warn!("Incomplete Block Records deleted: {:?}", start.elapsed());
+        warn!("Incomplete Block Records deleted: {:?}", start.elapsed());
 
         let start = Instant::now();
         //recalculate total_minted for each ticker
@@ -180,9 +180,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await
         {
             Ok(_) => {
-                log::warn!("Recalculation complete: {:?}", start.elapsed())
+                warn!("Recalculation complete: {:?}", start.elapsed())
             }
-            Err(e) => info!("Error recalculating total_minted for all tickers: {:?}", e),
+            Err(e) => error!("Error recalculating total_minted for all tickers: {:?}", e),
         };
 
         info!("Deleting User Balances...");
@@ -192,7 +192,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .drop_collection(consts::COLLECTION_USER_BALANCES)
             .await?;
 
-        log::warn!("User Balances Deleted: {:?}", start.elapsed());
+        warn!("User Balances Deleted: {:?}", start.elapsed());
 
         // rebuild userbalances
         info!("Rebuilding User Balances...");
@@ -202,9 +202,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await
         {
             Ok(_) => {
-                log::warn!("User Balances rebuilt: {:?}", start.elapsed());
+                warn!("User Balances rebuilt: {:?}", start.elapsed());
             }
-            Err(e) => info!("Error recreating userbalances: {:?}", e),
+            Err(e) => error!("Error recreating userbalances: {:?}", e),
         };
     }
 

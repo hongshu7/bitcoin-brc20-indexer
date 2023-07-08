@@ -10,7 +10,6 @@ use self::{
     user_balance::UserBalanceEntryType,
     utils::{extract_and_process_witness_data, get_owner_of_vout, get_witness_data_from_raw_tx},
 };
-use bitcoin::hashes::error;
 use bitcoincore_rpc::bitcoincore_rpc_json::{
     GetRawTransactionResult, GetRawTransactionResultVin, GetRawTransactionResultVout,
     GetRawTransactionResultVoutScriptPubKey,
