@@ -1,7 +1,13 @@
-use super::{brc20_ticker::Brc20Ticker, Brc20Inscription};
+use super::{
+    brc20_ticker::Brc20Ticker,
+    consts,
+    user_balance::{UserBalance, UserBalanceEntry},
+    Brc20Inscription, ToDocument,
+};
 use bitcoin::{Address, Network, TxIn};
 use bitcoincore_rpc::{bitcoincore_rpc_json::GetRawTransactionResult, Client, RpcApi};
-use log::error;
+use log::{debug, error};
+use mongodb::bson::{Bson, Document};
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -50,8 +56,8 @@ pub fn extract_and_process_witness_data(witness_data: String) -> Option<Brc20Ins
                         return Some(parsed_data);
                     }
                 }
-                Err(_e) => {
-                    // error!("JSON parsing failed: {:?}", e);
+                Err(e) => {
+                    debug!("JSON parsing failed: {:?}", e);
                 }
             }
         }
@@ -121,7 +127,7 @@ pub fn transaction_inputs_to_values(client: &Client, inputs: &[TxIn]) -> anyhow:
 
     for input in inputs {
         let prev_output = input.previous_output;
-        println!(
+        debug!(
             "Input from transaction: {:?}, index: {:?}",
             prev_output.txid, prev_output.vout
         );
@@ -139,6 +145,101 @@ pub fn transaction_inputs_to_values(client: &Client, inputs: &[TxIn]) -> anyhow:
     } else {
         Ok(values)
     }
+}
+
+pub fn update_receiver_balance_document(
+    user_balance_docs: &mut HashMap<(String, String), Document>,
+    user_balance_entry: &UserBalanceEntry,
+) -> Result<(), anyhow::Error> {
+    // Create the key from the address and ticker
+    let key = (
+        user_balance_entry.address.to_string(),
+        user_balance_entry.tick.clone(),
+    );
+
+    // Get the document from the hashmap or insert a new one if it doesn't exist
+    let user_balance = user_balance_docs.entry(key).or_insert_with(|| {
+        // If the UserBalance doesn't exist, create a new one with the given values
+        let new_balance = UserBalance {
+            address: user_balance_entry.address.to_string(),
+            tick: user_balance_entry.tick.clone(),
+            overall_balance: user_balance_entry.amt,
+            available_balance: user_balance_entry.amt,
+            transferable_balance: 0.0,
+        };
+
+        // Convert the UserBalance to a Document
+        new_balance.to_document()
+    });
+
+    // Update the existing document
+    // Get the overall and available balance values
+    let overall_balance = user_balance
+        .get(consts::OVERALL_BALANCE)
+        .and_then(Bson::as_f64)
+        .unwrap_or_default();
+    let available_balance = user_balance
+        .get(consts::AVAILABLE_BALANCE)
+        .and_then(Bson::as_f64)
+        .unwrap_or_default();
+
+    // Update the values
+    let updated_overall_balance = overall_balance + user_balance_entry.amt;
+    let updated_available_balance = available_balance + user_balance_entry.amt;
+
+    // Update the document
+    user_balance.insert(
+        consts::OVERALL_BALANCE.to_string(),
+        Bson::Double(updated_overall_balance),
+    );
+    user_balance.insert(
+        consts::AVAILABLE_BALANCE.to_string(),
+        Bson::Double(updated_available_balance),
+    );
+
+    Ok(())
+}
+
+pub fn update_sender_user_balance_document(
+    user_balances: &mut HashMap<(String, String), Document>,
+    user_balance_entry: &UserBalanceEntry,
+) -> Result<(), anyhow::Error> {
+    // Create the key from the address and ticker
+    let key = (
+        user_balance_entry.address.to_string(),
+        user_balance_entry.tick.clone(),
+    );
+
+    // Get the document from the hashmap or return an error if it doesn't exist
+    let user_balance = user_balances
+        .get_mut(&key)
+        .ok_or_else(|| anyhow::anyhow!("User balance document not found in memory"))?;
+
+    // Get the overall balance and transferable balance values
+    let overall_balance = user_balance
+        .get(consts::OVERALL_BALANCE)
+        .and_then(Bson::as_f64)
+        .unwrap_or_default();
+    let transferable_balance = user_balance
+        .get(consts::TRANSFERABLE_BALANCE)
+        .and_then(Bson::as_f64)
+        .unwrap_or_default();
+
+    // Update the values
+    let updated_overall_balance = overall_balance - user_balance_entry.amt;
+    let updated_transferable_balance = transferable_balance - user_balance_entry.amt;
+
+    // Update the document
+    user_balance.insert(
+        consts::OVERALL_BALANCE.to_string(),
+        Bson::Double(updated_overall_balance),
+    );
+    user_balance.insert(
+        consts::TRANSFERABLE_BALANCE.to_string(),
+        Bson::Double(updated_transferable_balance),
+    );
+
+    Ok(())
 }
 
 //this is for logging to file
