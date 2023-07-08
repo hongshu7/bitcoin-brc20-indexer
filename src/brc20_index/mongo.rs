@@ -7,6 +7,7 @@ use super::user_balance::{UserBalanceEntry, UserBalanceEntryType};
 use crate::brc20_index::consts;
 use futures_util::stream::TryStreamExt;
 use futures_util::StreamExt;
+use log::error;
 use mongodb::bson::{doc, Bson, DateTime, Document};
 use mongodb::options::{FindOneOptions, FindOptions, IndexOptions, UpdateOptions};
 use mongodb::{bson, options::ClientOptions, Client};
@@ -53,7 +54,7 @@ impl MongoClient {
             match collection.insert_one(document.clone(), None).await {
                 Ok(_) => return Ok(()),
                 Err(e) => {
-                    println!(
+                    error!(
                         "Attempt {}/{} failed with error: {}. Retrying...",
                         attempt + 1,
                         retries,
@@ -86,7 +87,7 @@ impl MongoClient {
             {
                 Ok(_) => return Ok(()),
                 Err(e) => {
-                    println!(
+                    error!(
                         "Attempt {}/{} failed with error: {}. Retrying...",
                         attempt + 1,
                         retries,
@@ -101,40 +102,40 @@ impl MongoClient {
         ))
     }
 
-    pub async fn update_many_with_retries(
-        &self,
-        collection_name: &str,
-        filter: Document,
-        update: Document,
-    ) -> anyhow::Result<()> {
-        let db = self.client.database(&self.db_name);
-        let collection = db.collection::<bson::Document>(collection_name);
-        let retries = consts::MONGO_RETRIES;
+    // pub async fn update_many_with_retries(
+    //     &self,
+    //     collection_name: &str,
+    //     filter: Document,
+    //     update: Document,
+    // ) -> anyhow::Result<()> {
+    //     let db = self.client.database(&self.db_name);
+    //     let collection = db.collection::<bson::Document>(collection_name);
+    //     let retries = consts::MONGO_RETRIES;
 
-        // Create UpdateOptions with upsert set to true
-        let update_options = UpdateOptions::builder().upsert(true).build();
+    //     // Create UpdateOptions with upsert set to true
+    //     let update_options = UpdateOptions::builder().upsert(true).build();
 
-        for attempt in 0..=retries {
-            match collection
-                .update_many(filter.clone(), update.clone(), update_options.clone())
-                .await
-            {
-                Ok(_) => return Ok(()),
-                Err(e) => {
-                    println!(
-                        "Attempt {}/{} failed with error: {}. Retrying...",
-                        attempt + 1,
-                        retries,
-                        e,
-                    );
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                }
-            }
-        }
-        Err(anyhow::anyhow!(
-            "Failed to update document after all retries"
-        ))
-    }
+    //     for attempt in 0..=retries {
+    //         match collection
+    //             .update_many(filter.clone(), update.clone(), update_options.clone())
+    //             .await
+    //         {
+    //             Ok(_) => return Ok(()),
+    //             Err(e) => {
+    //                 error!(
+    //                     "Attempt {}/{} failed with error: {}. Retrying...",
+    //                     attempt + 1,
+    //                     retries,
+    //                     e,
+    //                 );
+    //                 tokio::time::sleep(Duration::from_secs(2)).await;
+    //             }
+    //         }
+    //     }
+    //     Err(anyhow::anyhow!(
+    //         "Failed to update document after all retries"
+    //     ))
+    // }
 
     pub async fn find_one_with_retries(
         &self,
@@ -150,7 +151,7 @@ impl MongoClient {
             match collection.find_one(filter.clone(), options.clone()).await {
                 Ok(result) => return Ok(result),
                 Err(e) => {
-                    println!(
+                    error!(
                         "Attempt {}/{} failed with error: {}. Retrying...",
                         attempt + 1,
                         retries,
@@ -177,13 +178,13 @@ impl MongoClient {
             match collection.find(filter.clone(), options.clone()).await {
                 Ok(cursor) => return Ok(cursor),
                 Err(e) => {
-                    println!(
+                    error!(
                         "Attempt {}/{} failed with error: {}. Retrying...",
                         attempt + 1,
                         retries,
                         e,
                     );
-                    tokio::time::sleep(Duration::from_secs(2u64.pow(attempt))).await;
+                    tokio::time::sleep(Duration::from_secs(2)).await;
                 }
             }
         }
@@ -192,10 +193,24 @@ impl MongoClient {
         ))
     }
 
+    pub async fn insert_user_balances_with_retries(
+        &self,
+        mut user_balances: HashMap<(String, String), Document>,
+    ) -> Result<(), anyhow::Error> {
+        // Use drain to move all values out of the hashmap
+        let documents: Vec<bson::Document> = user_balances.drain().map(|(_, v)| v).collect();
+
+        // Insert the documents into the collection with retries
+        self.insert_many_with_retries(consts::COLLECTION_USER_BALANCES, &documents)
+            .await?;
+
+        Ok(())
+    }
+
     pub async fn insert_many_with_retries(
         &self,
         collection_name: &str,
-        documents: Vec<bson::Document>,
+        documents: &[bson::Document],
     ) -> Result<(), anyhow::Error> {
         let db = self.client.database(&self.db_name);
         let collection = db.collection::<bson::Document>(collection_name);
@@ -206,7 +221,7 @@ impl MongoClient {
             match collection.insert_many(documents.clone(), None).await {
                 Ok(_) => return Ok(()),
                 Err(e) => {
-                    println!(
+                    error!(
                         "Failed to insert documents: {}. Attempt {}/{}",
                         e,
                         attempts + 1,
@@ -234,7 +249,7 @@ impl MongoClient {
             match collection.delete_many(filter.clone(), None).await {
                 Ok(_) => return Ok(()),
                 Err(e) => {
-                    println!(
+                    error!(
                         "Failed to delete documents: {}. Attempt {}/{}",
                         e,
                         attempts + 1,
@@ -403,7 +418,7 @@ impl MongoClient {
         }
 
         // Insert the new user balances into the MongoDB collection
-        self.insert_many_with_retries(consts::COLLECTION_USER_BALANCES, collected_balances)
+        self.insert_many_with_retries(consts::COLLECTION_USER_BALANCES, &collected_balances)
             .await?;
 
         Ok(())
@@ -455,7 +470,7 @@ impl MongoClient {
                 Ok(result) => return Ok(result),
                 Err(e) => {
                     // Error handling and backoff logic here
-                    log::warn!(
+                    error!(
                         "Attempt {}/{} failed with error: {}. Retrying...",
                         attempt + 1,
                         retries,
@@ -520,21 +535,7 @@ impl MongoClient {
             .collect::<Result<Vec<_>, _>>();
 
         // Insert the documents into the collection with retries.
-        self.insert_many_with_retries(consts::COLLECTION_BRC20_ACTIVE_TRANSFERS, documents?)
-            .await?;
-
-        Ok(())
-    }
-
-    pub async fn insert_user_balances_with_retries(
-        &self,
-        user_balances: HashMap<(String, String), Document>,
-    ) -> Result<(), anyhow::Error> {
-        // Convert the hashmap values to a Vec<bson::Document>
-        let documents: Vec<bson::Document> = user_balances.values().cloned().collect();
-
-        // Insert the documents into the collection with retries
-        self.insert_many_with_retries(consts::COLLECTION_USER_BALANCES, documents)
+        self.insert_many_with_retries(consts::COLLECTION_BRC20_ACTIVE_TRANSFERS, &documents?)
             .await?;
 
         Ok(())
@@ -548,7 +549,7 @@ impl MongoClient {
             match self.load_user_balances().await {
                 Ok(result) => return Ok(result),
                 Err(e) => {
-                    log::warn!(
+                    error!(
                         "Attempt {}/{} failed with error: {}. Retrying...",
                         attempt + 1,
                         retries,
@@ -708,45 +709,45 @@ impl MongoClient {
         Ok(())
     }
 
-    pub async fn get_user_balances_by_block_height(
-        &self,
-        block_height: i64,
-    ) -> Result<HashMap<(String, String), Document>, anyhow::Error> {
-        // Find the document based on the block height
-        let filter_doc = doc! {"block_height": block_height};
-        let document = self
-            .get_document_by_filter(consts::COLLECTION_TOTAL_MINTED_AT_BLOCK_HEIGHT, filter_doc)
-            .await?
-            .ok_or_else(|| {
-                anyhow::anyhow!("Document not found for block height: {}", block_height)
-            })?;
+    // pub async fn get_user_balances_by_block_height(
+    //     &self,
+    //     block_height: i64,
+    // ) -> Result<HashMap<(String, String), Document>, anyhow::Error> {
+    //     // Find the document based on the block height
+    //     let filter_doc = doc! {"block_height": block_height};
+    //     let document = self
+    //         .get_document_by_filter(consts::COLLECTION_TOTAL_MINTED_AT_BLOCK_HEIGHT, filter_doc)
+    //         .await?
+    //         .ok_or_else(|| {
+    //             anyhow::anyhow!("Document not found for block height: {}", block_height)
+    //         })?;
 
-        // Get the user balances array from the document
-        let user_balances_array = document.get_array("user_balances").or_else(|_| {
-            Err(anyhow::anyhow!(
-                "'user_balances' array not found in the document"
-            ))
-        })?;
+    //     // Get the user balances array from the document
+    //     let user_balances_array = document.get_array("user_balances").or_else(|_| {
+    //         Err(anyhow::anyhow!(
+    //             "'user_balances' array not found in the document"
+    //         ))
+    //     })?;
 
-        // Convert the user balances array into a hashmap
-        let mut user_balances = HashMap::new();
-        for user_balance_doc in user_balances_array
-            .iter()
-            .filter_map(|doc| doc.as_document())
-        {
-            if let (Ok(address), Ok(tick)) = (
-                user_balance_doc.get_str("address"),
-                user_balance_doc.get_str("tick"),
-            ) {
-                user_balances.insert(
-                    (address.to_string(), tick.to_string()),
-                    user_balance_doc.clone(),
-                );
-            }
-        }
+    //     // Convert the user balances array into a hashmap
+    //     let mut user_balances = HashMap::new();
+    //     for user_balance_doc in user_balances_array
+    //         .iter()
+    //         .filter_map(|doc| doc.as_document())
+    //     {
+    //         if let (Ok(address), Ok(tick)) = (
+    //             user_balance_doc.get_str("address"),
+    //             user_balance_doc.get_str("tick"),
+    //         ) {
+    //             user_balances.insert(
+    //                 (address.to_string(), tick.to_string()),
+    //                 user_balance_doc.clone(),
+    //             );
+    //         }
+    //     }
 
-        Ok(user_balances)
-    }
+    //     Ok(user_balances)
+    // }
 
     pub async fn create_indexes(&self) -> Result<(), Box<dyn std::error::Error>> {
         let db = self.client.database(&self.db_name);

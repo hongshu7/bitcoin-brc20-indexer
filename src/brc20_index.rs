@@ -53,6 +53,7 @@ pub async fn index_brc20(
                             current_block_hash, length, current_block_height
                         );
 
+                        let start = Instant::now();
                         let mut active_transfers_opt =
                             mongo_client.load_active_transfers_with_retry().await?;
 
@@ -60,25 +61,9 @@ pub async fn index_brc20(
                         if active_transfers_opt.is_none() {
                             active_transfers_opt = Some(HashMap::new());
                         }
-
-                        // slower , TODO: delete
-                        // let start = Instant::now();
-
-                        // let mut user_balance_docs = match mongo_client
-                        //     .get_user_balances_by_block_height((current_block_height - 1).into())
-                        //     .await
-                        // {
-                        //     Ok(docs) => docs,
-                        //     Err(e) => {
-                        //         error!("Failed to get user balances by block height: {:?}", e);
-                        //         HashMap::new()
-                        //     }
-                        // };
-
-                        // warn!("User Balances loaded: {:?}", start.elapsed());
+                        warn!("Active Transfers loaded: {:?}", start.elapsed());
 
                         let start = Instant::now();
-
                         let mut user_balance_docs =
                             match mongo_client.load_user_balances_with_retry().await {
                                 Ok(docs) => docs,
@@ -289,19 +274,34 @@ pub async fn index_brc20(
 
                         // Bulk write the updated and new user balance documents back to MongoDB
                         if !user_balance_docs.is_empty() {
-                            let start = Instant::now(); // time the process
+                            // This removes all UserBalance with 0 in all the balance fields.
+                            user_balance_docs.retain(|_, user_balance_doc| {
+                                let overall_balance = user_balance_doc
+                                    .get_f64("overall_balance")
+                                    .unwrap_or_default();
+                                let available_balance = user_balance_doc
+                                    .get_f64("available_balance")
+                                    .unwrap_or_default();
+                                let transferable_balance = user_balance_doc
+                                    .get_f64("transferable_balance")
+                                    .unwrap_or_default();
 
+                                overall_balance != 0.0
+                                    || available_balance != 0.0
+                                    || transferable_balance != 0.0
+                            });
+
+                            let start = Instant::now();
                             // drop mongodb collection right before inserting active transfers
                             mongo_client
                                 .drop_collection(consts::COLLECTION_USER_BALANCES)
                                 .await?;
-
                             warn!("User Balances Deleted after block: {:?}", start.elapsed());
 
                             let start = Instant::now();
                             // Bulk write user balance documents to mongodb
                             match mongo_client
-                                .insert_user_balances_with_retries(user_balance_docs.clone())
+                                .insert_user_balances_with_retries(user_balance_docs.clone()) // Removed .clone() here
                                 .await
                             {
                                 Ok(_) => {
@@ -316,6 +316,7 @@ pub async fn index_brc20(
                             }
                         }
 
+                        let start = Instant::now();
                         insert_documents_to_mongo_after_each_block(
                             mongo_client,
                             mint_documents,
@@ -325,6 +326,10 @@ pub async fn index_brc20(
                             user_balance_entry_documents,
                         )
                         .await?;
+                        warn!(
+                            "insert_documents_to_mongo_after_each_block: {:?}",
+                            start.elapsed()
+                        );
 
                         // convert tickers hashmap to vec<Document>
                         let tickers: Vec<Document> =
@@ -333,7 +338,7 @@ pub async fn index_brc20(
                         // Bulk update tickers in mongodb
                         if !tickers.is_empty() {
                             let start = Instant::now();
-                            for ticker in tickers {
+                            for ticker in &tickers {
                                 let filter_doc = doc! {
                                     "tick": ticker.get_str("tick").unwrap_or_default(),
                                 };
@@ -343,15 +348,20 @@ pub async fn index_brc20(
                                 };
 
                                 mongo_client
-                                    .update_many_with_retries(
+                                    .update_one_with_retries(
                                         consts::COLLECTION_TICKERS,
                                         filter_doc,
                                         update_doc,
+                                        None,
                                     )
                                     .await?;
                             }
 
-                            warn!("Tickers updated after block: {:?}", start.elapsed());
+                            warn!(
+                                "{} Tickers updated after block: {:?}",
+                                tickers.len(),
+                                start.elapsed()
+                            );
                         }
 
                         let start = Instant::now();
@@ -411,13 +421,13 @@ pub async fn index_brc20(
                         current_block_height += 1;
                     }
                     Err(e) => {
-                        error!("Failed to fetch block: {:?}", e);
+                        error!("Failed to fetch block: {:?}, retrying...", e);
                         sleep(Duration::from_secs(60));
                     }
                 }
             }
             Err(e) => {
-                error!("Failed to fetch block hash for height: {:?}", e);
+                error!("Failed to fetch block hash for height: {:?}, retrying", e);
                 sleep(Duration::from_secs(60));
             }
         }
@@ -465,10 +475,9 @@ pub async fn check_for_transfer_send(
                 {
                     Some(doc) => doc,
                     None => {
-                        log::error!(
+                        error!(
                             "Transfer inscription not found for txid: {}, vout: {}",
-                            txid,
-                            vout
+                            txid, vout
                         );
                         continue;
                     }
@@ -606,7 +615,7 @@ pub async fn insert_documents_to_mongo_after_each_block(
     if !mint_documents.is_empty() {
         let start = Instant::now();
         mongo_client
-            .insert_many_with_retries(consts::COLLECTION_MINTS, mint_documents)
+            .insert_many_with_retries(consts::COLLECTION_MINTS, &mint_documents)
             .await?;
         warn!("Mints inserted after block: {:?}", start.elapsed());
     }
@@ -615,7 +624,7 @@ pub async fn insert_documents_to_mongo_after_each_block(
     if !transfer_documents.is_empty() {
         let start = Instant::now();
         mongo_client
-            .insert_many_with_retries(consts::COLLECTION_TRANSFERS, transfer_documents)
+            .insert_many_with_retries(consts::COLLECTION_TRANSFERS, &transfer_documents)
             .await?;
         warn!("Transfers inserted after block: {:?}", start.elapsed());
     }
@@ -624,7 +633,7 @@ pub async fn insert_documents_to_mongo_after_each_block(
     if !deploy_documents.is_empty() {
         let start = Instant::now();
         mongo_client
-            .insert_many_with_retries(consts::COLLECTION_DEPLOYS, deploy_documents)
+            .insert_many_with_retries(consts::COLLECTION_DEPLOYS, &deploy_documents)
             .await?;
         warn!("Deploys inserted after block: {:?}", start.elapsed());
     }
@@ -633,7 +642,7 @@ pub async fn insert_documents_to_mongo_after_each_block(
     if !invalid_brc20_documents.is_empty() {
         let start = Instant::now();
         mongo_client
-            .insert_many_with_retries(consts::COLLECTION_INVALIDS, invalid_brc20_documents)
+            .insert_many_with_retries(consts::COLLECTION_INVALIDS, &invalid_brc20_documents)
             .await?;
         warn!("Invalids inserted after block: {:?}", start.elapsed());
     }
@@ -644,7 +653,7 @@ pub async fn insert_documents_to_mongo_after_each_block(
         mongo_client
             .insert_many_with_retries(
                 consts::COLLECTION_USER_BALANCE_ENTRY,
-                user_balance_entry_documents,
+                &user_balance_entry_documents,
             )
             .await?;
         warn!(
