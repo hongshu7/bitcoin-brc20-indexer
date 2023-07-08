@@ -127,7 +127,7 @@ pub fn transaction_inputs_to_values(client: &Client, inputs: &[TxIn]) -> anyhow:
 
     for input in inputs {
         let prev_output = input.previous_output;
-        println!(
+        debug!(
             "Input from transaction: {:?}, index: {:?}",
             prev_output.txid, prev_output.vout
         );
