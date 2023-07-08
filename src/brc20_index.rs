@@ -269,7 +269,8 @@ pub async fn index_brc20(
 
                         // time to process the block
                         warn!(
-                            "Block Transactions Processed in: {:?}",
+                            "{} Transactions Processed in: {:?}",
+                            tx_height,
                             process_block_start_time.elapsed()
                         );
 
