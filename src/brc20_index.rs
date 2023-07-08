@@ -506,7 +506,7 @@ pub async fn check_for_transfer_send(
 
             // If the sum of input values (up to the current input index) is greater than the total output value,
             // assume that the sender is the receiver.
-            if input_value_sum > total_output_value {
+            if input_value_sum >= total_output_value {
                 std::usize::MAX // use MAX as a sentinel value
             } else {
                 // Calculate the index of the output (vout) which is the recipient of the
