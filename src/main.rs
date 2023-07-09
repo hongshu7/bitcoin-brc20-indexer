@@ -129,7 +129,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Call create_indexes after MongoClient has been initialized
     mongo_client.create_indexes().await?;
 
-    info!("Retrieving starting block height...");
     let start = Instant::now();
     // get block height to start indexing from
     let mut start_block_height = consts::BRC20_STARTING_BLOCK_HEIGHT; // default starting point

@@ -60,11 +60,7 @@ pub async fn index_brc20(
                         if active_transfers_opt.is_none() {
                             active_transfers_opt = Some(HashMap::new());
                         }
-                        warn!(
-                            "Active Transfers loaded: {} in {:?}",
-                            active_transfers_opt.as_ref().into_iter().len(),
-                            start.elapsed()
-                        );
+                        warn!("Active Transfers loaded: {:?}", start.elapsed());
 
                         let start = Instant::now();
                         let mut user_balance_docs =

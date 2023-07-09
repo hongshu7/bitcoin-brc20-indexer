@@ -123,7 +123,7 @@ impl Brc20Transfer {
 
             // check if user has enough balance to transfer
             if available_balance >= transfer_amount {
-                info!("VALID: Transfer inscription added. From: {:#?}", self.from);
+                info!("VALID: Transfer inscription added. From: {:?}", self.from);
                 self.is_valid = true;
 
                 // insert user balance entry
