@@ -60,7 +60,11 @@ pub async fn index_brc20(
                         if active_transfers_opt.is_none() {
                             active_transfers_opt = Some(HashMap::new());
                         }
-                        warn!("Active Transfers loaded: {:?}", start.elapsed());
+                        warn!(
+                            "Active Transfers loaded: {} in {:?}",
+                            active_transfers_opt.as_ref().into_iter().len(),
+                            start.elapsed()
+                        );
 
                         let start = Instant::now();
                         let mut user_balance_docs =
@@ -71,7 +75,11 @@ pub async fn index_brc20(
                                     HashMap::new()
                                 }
                             };
-                        warn!("User Balances loaded: {:?}", start.elapsed());
+                        warn!(
+                            "User Balances loaded: {} in {:?}",
+                            user_balance_docs.len(),
+                            start.elapsed()
+                        );
 
                         // Vectors for mongo bulk writes
                         let mut mint_documents = Vec::new();
@@ -266,7 +274,7 @@ pub async fn index_brc20(
 
                         // time to process the block
                         warn!(
-                            "{} Transactions Processed in: {:?}",
+                            "Transactions Processed: {} in {:?}",
                             tx_height,
                             process_block_start_time.elapsed()
                         );
@@ -305,7 +313,8 @@ pub async fn index_brc20(
                             {
                                 Ok(_) => {
                                     warn!(
-                                        "User Balances inserted after block: {:?}",
+                                        "User Balances inserted to MongoDB after block: {} in {:?}",
+                                        user_balance_docs.len(),
                                         start.elapsed()
                                     )
                                 }
@@ -351,33 +360,30 @@ pub async fn index_brc20(
                                     .await?;
                             }
 
-                            warn!(
-                                "{} Tickers updated after block: {:?}",
+                            info!(
+                                "Tickers updated after block: {} in {:?}",
                                 tickers.len(),
                                 start.elapsed()
                             );
                         }
 
-                        let start = Instant::now();
                         // drop mongodb collection right before inserting active transfers
                         mongo_client
                             .drop_collection(consts::COLLECTION_BRC20_ACTIVE_TRANSFERS)
                             .await?;
-                        warn!(
-                            "Active Transfers Deleted after block: {:?}",
-                            start.elapsed()
-                        );
 
                         // store active transfer collection, if any
                         if let Some(active_transfers) = active_transfers_opt {
+                            let length = active_transfers.len();
                             if !active_transfers.is_empty() {
                                 let start = Instant::now();
                                 mongo_client
                                     .insert_active_transfers_to_mongodb(active_transfers)
                                     .await?;
 
-                                warn!(
-                                    "Active Transfers inserted after block: {:?}",
+                                info!(
+                                    "Active Transfers inserted to MongoDB after block: {} in {:?}",
+                                    length,
                                     start.elapsed()
                                 );
                             }
@@ -394,7 +400,7 @@ pub async fn index_brc20(
                             .await?;
 
                         warn!(
-                            "Tickers and User Balances inserted after block: {:?}",
+                            "Tickers and User Balances backups inserted to MongoDB after block: {:?}",
                             start.elapsed()
                         );
 
@@ -450,15 +456,19 @@ pub async fn check_for_transfer_send(
         } else {
             continue;
         }
-
+        info!("Transfer Send Found: {:?}", key);
         // Check if transfer exists in the transfer_documents vector in memory
         let transfer_doc_opt = transfer_documents.iter().find(|doc| {
-            doc.get_str("tx.txid").ok() == Some(&txid) && doc.get_i64("tx.vout").ok() == Some(vout)
+            if let Ok(txid) = doc.get_document("tx").and_then(|tx| tx.get_str("txid")) {
+                return txid == txid;
+            }
+            false
         });
 
         let transfer_doc = match transfer_doc_opt {
             Some(transfer_doc) => transfer_doc.clone(),
             None => {
+                info!("Checking in mongodb: {:?}", key);
                 // get mongo doc for transfers collection that matches the txid and vout
                 let filter_doc = doc! {"tx.txid": txid.clone()};
                 match mongo_client
@@ -617,7 +627,11 @@ pub async fn insert_documents_to_mongo_after_each_block(
         mongo_client
             .insert_many_with_retries(consts::COLLECTION_MINTS, &mint_documents)
             .await?;
-        warn!("Mints inserted after block: {:?}", start.elapsed());
+        warn!(
+            "Mints inserted after block: {} in {:?}",
+            mint_documents.len(),
+            start.elapsed()
+        );
     }
 
     // If there are transfer documents, insert them into the transfers collection
@@ -626,7 +640,11 @@ pub async fn insert_documents_to_mongo_after_each_block(
         mongo_client
             .insert_many_with_retries(consts::COLLECTION_TRANSFERS, &transfer_documents)
             .await?;
-        warn!("Transfers inserted after block: {:?}", start.elapsed());
+        warn!(
+            "Transfers inserted after block: {} in {:?}",
+            transfer_documents.len(),
+            start.elapsed()
+        );
     }
 
     // If there are deploy documents, insert them into the deploys collection
@@ -635,7 +653,11 @@ pub async fn insert_documents_to_mongo_after_each_block(
         mongo_client
             .insert_many_with_retries(consts::COLLECTION_DEPLOYS, &deploy_documents)
             .await?;
-        warn!("Deploys inserted after block: {:?}", start.elapsed());
+        warn!(
+            "Deploys inserted after block: {} in {:?}",
+            deploy_documents.len(),
+            start.elapsed()
+        );
     }
 
     // If there are invalid BRC20 documents, insert them into the invalids collection
@@ -644,7 +666,11 @@ pub async fn insert_documents_to_mongo_after_each_block(
         mongo_client
             .insert_many_with_retries(consts::COLLECTION_INVALIDS, &invalid_brc20_documents)
             .await?;
-        warn!("Invalids inserted after block: {:?}", start.elapsed());
+        warn!(
+            "Invalids inserted after block: {} in {:?}",
+            invalid_brc20_documents.len(),
+            start.elapsed()
+        );
     }
 
     // If there are user balance entry documents, insert them into the user balance entry collection
@@ -657,7 +683,8 @@ pub async fn insert_documents_to_mongo_after_each_block(
             )
             .await?;
         warn!(
-            "User Balance Entries inserted after block: {:?}",
+            "User Balance Entries inserted after block: {} in {:?}",
+            user_balance_entry_documents.len(),
             start.elapsed()
         );
     }

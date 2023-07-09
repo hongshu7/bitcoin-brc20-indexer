@@ -72,10 +72,6 @@ impl Brc20Transfer {
         }
     }
 
-    pub fn get_transfer_script(&self) -> &Brc20Inscription {
-        &self.inscription
-    }
-
     pub fn is_valid(&self) -> bool {
         self.is_valid
     }
@@ -241,13 +237,6 @@ pub async fn handle_transfer_operation(
             invalid_brc20_docs,
         )
         .await?;
-
-    if validated_transfer_tx.is_valid() {
-        info!(
-            "Transfer: {:?}",
-            validated_transfer_tx.get_transfer_script()
-        );
-    }
 
     Ok((validated_transfer_tx, user_balance_entry))
 }
