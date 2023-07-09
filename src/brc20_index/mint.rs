@@ -245,10 +245,7 @@ pub async fn handle_mint_operation(
 
     // Check if the mint operation is valid.
     if validated_mint_tx.is_valid() {
-        info!(
-            "VALID: Mint inscription added: {}",
-            validated_mint_tx.get_mint()
-        );
+        info!("VALID: Mint inscription: {}", validated_mint_tx.get_mint());
         info!("TO Address: {:?}", validated_mint_tx.to);
 
         // update_balances_and_ticker
