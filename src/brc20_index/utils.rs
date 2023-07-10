@@ -166,6 +166,7 @@ pub fn update_receiver_balance_document(
             overall_balance: user_balance_entry.amt,
             available_balance: user_balance_entry.amt,
             transferable_balance: 0.0,
+            block_height: user_balance_entry.block_height,
         };
 
         // Convert the UserBalance to a Document
@@ -195,6 +196,11 @@ pub fn update_receiver_balance_document(
     user_balance.insert(
         consts::AVAILABLE_BALANCE.to_string(),
         Bson::Double(updated_available_balance),
+    );
+    // Update the block height
+    user_balance.insert(
+        consts::KEY_BLOCK_HEIGHT.to_string(),
+        Bson::Int64(user_balance_entry.block_height as i64),
     );
 
     Ok(())
@@ -237,6 +243,11 @@ pub fn update_sender_user_balance_document(
     user_balance.insert(
         consts::TRANSFERABLE_BALANCE.to_string(),
         Bson::Double(updated_transferable_balance),
+    );
+    // Update the block height
+    user_balance.insert(
+        consts::KEY_BLOCK_HEIGHT.to_string(),
+        Bson::Int64(user_balance_entry.block_height as i64),
     );
 
     Ok(())

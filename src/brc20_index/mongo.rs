@@ -377,6 +377,7 @@ impl MongoClient {
                 "available_balance": available_balance,
                 "transferable_balance": transferable_balance,
                 "overall_balance": overall_balance,
+                "block_height": block_height,
             };
 
             collected_balances.push(new_user_balance);

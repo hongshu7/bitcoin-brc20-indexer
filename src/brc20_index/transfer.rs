@@ -161,6 +161,12 @@ impl Brc20Transfer {
                     Bson::Double(updated_transferable_balance),
                 );
 
+                // Update the block_height
+                user_balance.insert(
+                    consts::KEY_BLOCK_HEIGHT.to_string(),
+                    Bson::Int64(self.block_height.into()),
+                );
+
                 user_balances.insert((from.clone(), ticker_symbol.clone()), user_balance);
 
                 // Create new active transfer when inscription is valid

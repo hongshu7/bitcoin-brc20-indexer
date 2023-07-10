@@ -1,5 +1,5 @@
 use super::ToDocument;
-use mongodb::bson::{doc, Bson, DateTime, Document};
+use mongodb::bson::{doc, Document};
 use serde::Serialize;
 use std::fmt;
 
@@ -10,6 +10,7 @@ pub struct UserBalance {
     pub overall_balance: f64,
     pub available_balance: f64,
     pub transferable_balance: f64,
+    pub block_height: u64,
 }
 
 impl ToDocument for UserBalance {
@@ -20,7 +21,7 @@ impl ToDocument for UserBalance {
             "overall_balance": self.overall_balance,
             "available_balance": self.available_balance,
             "transferable_balance": self.transferable_balance,
-            "created_at": Bson::DateTime(DateTime::now())
+            "block_height": self.block_height as i64,
         }
     }
 }
