@@ -12,11 +12,11 @@ $ gcloud compute ssh indexer-omnisat-rs --zone us-central1-c --project pineapple
 ```
 Make the directory example:
 ```bash
-$ mkdir -p /home/zuwuko/omnisat-indexer-mongo-indexing
+$ mkdir -p /home/zuwuko/omnisat-indexer-fix-send-edge-case
 ```
 ## send tarball to VM server
 ```bash
-$ gcloud compute scp omnisat-indexer-rs.tar.gz indexer-omnisat-rs:/home/zuwuko/omnisat-indexer-mongo-indexing/ --zone us-central1-c --project pineappleworkshop
+$ gcloud compute scp omnisat-indexer-rs.tar.gz indexer-omnisat-rs:/home/zuwuko/omnisat-indexer-fix-send-edge-case/ --zone us-central1-c --project pineappleworkshop
 ```
 ## Extract the codebase files
 ```bash
@@ -26,15 +26,15 @@ $ tar -zxvf omnisat-indexer-rs.tar.gz
 
 ## Docker Build
 ```bash
-$ sudo docker build -t gcr.io/pineappleworkshop/omnisat-indexer-rs-mongo-indexing:0.0.1 .
+$ sudo docker build -t gcr.io/pineappleworkshop/omnisat-indexer-rs-fix-send-edge-case:0.0.1 .
 ```
 ## Docker Run in background
 ```bash
-$ sudo docker run -d --env-file .env --restart always gcr.io/pineappleworkshop/omnisat-indexer-rs-mongo-indexing:0.0.1
+$ sudo docker run -d --env-file .env --restart always gcr.io/pineappleworkshop/omnisat-indexer-rs-fix-send-edge-case:0.0.1
 ```
 ## See logs remotely:
 ```bash
-$ gcloud compute ssh indexer-omnisat-rs --zone us-central1-c --project pineappleworkshop --command 'sudo docker logs -f 168e4236429c'
+$ gcloud compute ssh indexer-omnisat-rs --zone us-central1-c --project pineappleworkshop --command 'sudo docker logs -f 818038064c9c'
 ```
 
 ### getting started
