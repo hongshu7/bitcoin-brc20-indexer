@@ -146,12 +146,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     warn!("Retrieved starting block height: {:?}", start.elapsed());
 
-    info!("Deleting incomplete records...");
-    let start = Instant::now();
-
     // if BRC20_STARTING_BLOCK_HEIGHT is < start_block_height, then we need to delete everything in db that is >= start_block_height
     // delete deploys, mints, transfers, inscriptions, tickers, invalids, entries
     if consts::BRC20_STARTING_BLOCK_HEIGHT < start_block_height {
+        info!("Deleting incomplete records...");
+        let start = Instant::now();
+
         let collections = vec![
             consts::COLLECTION_DEPLOYS,
             consts::COLLECTION_MINTS,
@@ -171,18 +171,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         warn!("Incomplete Block Records deleted: {:?}", start.elapsed());
 
+        info!("Resetting total_minted for selected tickers...");
         let start = Instant::now();
-        //recalculate total_minted for each ticker
-        info!("Recalculating total_minted for all tickers...");
         match mongo_client
-            .update_ticker_totals(start_block_height - 1)
+            .reset_tickers_total_minted(start_block_height)
             .await
         {
-            Ok(_) => {
-                warn!("Recalculation complete: {:?}", start.elapsed())
+            Ok(updated_tickers) => {
+                println!("Reset total_minted for the following tickers:");
+                for ticker in &updated_tickers {
+                    println!("{}", ticker);
+                }
+                warn!("Reset total_minted for tickers in: {:?}", start.elapsed());
+                updated_tickers
             }
-            Err(e) => error!("Error recalculating total_minted for all tickers: {:?}", e),
+            Err(e) => {
+                error!("Error resetting total_minted for tickers: {:?}", e);
+                Vec::new() // Return an empty vector if there is an error
+            }
         };
+
+        // let start = Instant::now();
+        // //recalculate total_minted for each ticker
+        // info!("Recalculating total_minted for all tickers...");
+        // match mongo_client
+        //     .update_ticker_totals(start_block_height - 1)
+        //     .await
+        // {
+        //     Ok(_) => {
+        //         warn!("Recalculation complete: {:?}", start.elapsed())
+        //     }
+        //     Err(e) => error!("Error recalculating total_minted for all tickers: {:?}", e),
+        // };
 
         info!("Deleting User Balances...");
         let start = Instant::now();

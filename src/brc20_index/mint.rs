@@ -8,7 +8,7 @@ use super::{
 };
 use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
-use log::{error, info};
+use log::{error, info, warn};
 use mongodb::bson::{doc, Bson, DateTime, Document};
 use serde::Serialize;
 
@@ -189,7 +189,7 @@ async fn update_ticker_total_minted(
         // Create a new document with the updated total_minted
         let mut updated_ticker_doc = ticker_doc.clone();
         updated_ticker_doc.insert("total_minted", Bson::Double(new_total_minted));
-        updated_ticker_doc.insert("updated_block_height", block_height as i32);
+        updated_ticker_doc.insert("updated_at_block", block_height as i32);
 
         // Replace the old ticker_doc in the hashmap with the updated one
         tickers.insert(ticker_symbol.clone(), updated_ticker_doc);

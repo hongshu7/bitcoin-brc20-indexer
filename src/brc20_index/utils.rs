@@ -200,6 +200,7 @@ pub async fn update_receiver_balance_document(
     Ok(())
 }
 
+/// Update the receiver's balance document
 fn update_receiver(
     user_balance: &mut Document,
     user_balance_entry: &UserBalanceEntry,

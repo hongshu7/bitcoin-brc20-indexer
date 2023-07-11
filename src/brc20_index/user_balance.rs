@@ -130,12 +130,7 @@ pub async fn update_user_balances(
         let update_options = Some(UpdateOptions::builder().upsert(true).build());
 
         mongo_client
-            .update_one_with_retries(
-                collection_name,
-                filter.clone(),
-                update.clone(),
-                update_options,
-            )
+            .update_one_with_retries(collection_name, filter, update, update_options)
             .await?;
     }
 

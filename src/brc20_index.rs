@@ -66,21 +66,6 @@ pub async fn index_brc20(
                         }
                         warn!("Active Transfers loaded: {:?}", start.elapsed());
 
-                        // let start = Instant::now();
-                        // let mut user_balance_docs =
-                        //     match mongo_client.load_user_balances_with_retry().await {
-                        //         Ok(docs) => docs,
-                        //         Err(e) => {
-                        //             error!("Failed to get user balances by block height: {:?}", e);
-                        //             HashMap::new()
-                        //         }
-                        //     };
-                        // warn!(
-                        //     "User Balances loaded: {} in {:?}",
-                        //     user_balance_docs.len(),
-                        //     start.elapsed()
-                        // );
-
                         // Vectors for mongo bulk writes
                         let mut mint_documents = Vec::new();
                         let mut transfer_documents = Vec::new();
@@ -286,6 +271,10 @@ pub async fn index_brc20(
 
                         // Bulk write the updated and new user balance documents back to MongoDB
                         if !user_balance_docs.is_empty() {
+                            let start = Instant::now();
+                            info!("removing user balance documents with 0 balances");
+
+                            let start_len = user_balance_docs.len();
                             // This removes all UserBalance with 0 in all the balance fields.
                             user_balance_docs.retain(|_, user_balance_doc| {
                                 let overall_balance = user_balance_doc
@@ -303,9 +292,16 @@ pub async fn index_brc20(
                                     || transferable_balance != 0.0
                             });
 
+                            let len = user_balance_docs.len();
+
+                            warn!(
+                                "Zeroed User Balances removed: {} in {:?}",
+                                start_len - len,
+                                start.elapsed()
+                            );
+
                             let start = Instant::now();
                             // Bulk write user balance documents to mongodb
-                            let len = user_balance_docs.len();
                             match update_user_balances(mongo_client, user_balance_docs).await {
                                 Ok(_) => {
                                     warn!(
@@ -333,6 +329,8 @@ pub async fn index_brc20(
                         // convert tickers hashmap to vec<Document>
                         let tickers: Vec<Document> =
                             tickers.into_iter().map(|(_, ticker)| ticker).collect();
+
+                        println!("tickers main loop: {:?}", tickers);
 
                         // Bulk update tickers in mongodb
                         if !tickers.is_empty() {

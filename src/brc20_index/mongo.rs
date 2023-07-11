@@ -561,7 +561,8 @@ impl MongoClient {
 
                 // Update the total_minted field for this ticker in the tickers collection
                 let filter = doc! { "tick": tick };
-                let update = doc! { "$set": { "total_minted": total_minted } };
+                let update =
+                    doc! { "$set": { "total_minted": total_minted, "block_height": block_height } };
 
                 self.update_one_with_retries(
                     consts::COLLECTION_TICKERS,
@@ -668,6 +669,18 @@ impl MongoClient {
         // Create the index for COLLECTION_TRANSFERS
         transfers_collection
             .create_index(txid_index_model, None)
+            .await?;
+
+        // Create an index on the 'inscription.tick' field for COLLECTION_MINTS
+        let mints_collection = db.collection::<bson::Document>(consts::COLLECTION_MINTS);
+        let mints_index_model = IndexModel::builder()
+            .keys(doc! { "inscription.tick": 1 }) // 1 for ascending
+            .options(IndexOptions::default())
+            .build();
+
+        // Create the index for COLLECTION_MINTS
+        mints_collection
+            .create_index(mints_index_model, None)
             .await?;
 
         Ok(())
@@ -785,6 +798,74 @@ impl MongoClient {
                     .await?;
             }
         }
+
+        Ok(())
+    }
+
+    pub async fn reset_tickers_total_minted(
+        &self,
+        block_height: i64,
+    ) -> Result<Vec<Document>, Box<dyn std::error::Error>> {
+        let db = self.client.database(&self.db_name);
+        let collection = db.collection::<bson::Document>(consts::COLLECTION_TICKERS);
+
+        let filter = doc! { "updated_at_block": { "$gte": block_height } };
+
+        let options = FindOptions::builder().build();
+        let mut cursor = collection.find(filter, options).await?;
+        let mut updated_tickers: Vec<Document> = Vec::new();
+
+        // Iterate over the documents that match the filter
+        while let Some(result) = cursor.next().await {
+            let mut doc = result?;
+
+            // Reset total_minted to 0.0
+            doc.insert("total_minted", 0.0);
+            doc.insert("updated_at_block", block_height);
+
+            // Call the calculate_and_update_total_minted function
+            match self
+                .calculate_and_update_total_minted_for_ticker(&mut doc)
+                .await
+            {
+                Ok(_) => {}
+                Err(e) => {
+                    error!("Error calculating and updating total_minted: {}", e);
+                    continue;
+                }
+            }
+
+            updated_tickers.push(doc);
+        }
+
+        Ok(updated_tickers)
+    }
+
+    pub async fn calculate_and_update_total_minted_for_ticker(
+        &self,
+        ticker_doc: &mut Document,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let db = self.client.database(&self.db_name);
+        let tickers_coll = db.collection::<bson::Document>(consts::COLLECTION_TICKERS);
+        let mints_coll = db.collection::<bson::Document>(consts::COLLECTION_MINTS);
+
+        let mut update_doc = ticker_doc.clone();
+
+        let tick = ticker_doc.get_str("tick")?;
+
+        let filter = doc! { "inscription.tick": tick };
+        let cursor = mints_coll.find(filter, None).await?;
+        let mints: Vec<Document> = cursor.try_collect().await?;
+
+        let total_minted: f64 = mints
+            .iter()
+            .filter_map(|mint| mint.get_f64("amt").ok())
+            .sum();
+
+        update_doc.insert("total_minted", total_minted);
+        let update = doc! { "$set": update_doc};
+        let filter = doc! { "tick": tick };
+        tickers_coll.update_one(filter, update, None).await?;
 
         Ok(())
     }

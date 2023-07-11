@@ -21,7 +21,6 @@ impl ToDocument for Brc20Ticker {
             "decimals": self.decimals as i64,
             "total_minted": self.total_minted,
             "block_height": self.deploy.block_height,
-            "updated_block_height": self.deploy.block_height,
         }
     }
 }
