@@ -84,6 +84,7 @@ impl Brc20Transfer {
         mongo_client: &MongoClient,
         active_transfers: &mut Option<HashMap<(String, i64), Brc20ActiveTransfer>>,
         user_balances: &mut HashMap<(String, String), Document>,
+        user_balances_to_insert: &mut HashMap<(String, String), Document>,
         invalid_brc20_docs: &mut Vec<Document>,
     ) -> Result<UserBalanceEntry, Box<dyn std::error::Error>> {
         let ticker_symbol = &self.inscription.tick.to_lowercase();
@@ -108,40 +109,52 @@ impl Brc20Transfer {
             )));
         }
 
-        // Get the user balance from the user_balances hashmap or load it from the database
+        // Get the user balance document from the hashmap
         let user_balance_from = user_balances.get_mut(&(from.clone(), ticker_symbol.clone()));
-        info!("user_balance_from hashmap: {:?}", user_balance_from);
 
         let user_balance = match user_balance_from {
             Some(user_balance) => user_balance,
             None => {
-                // User balance not found in the hashmap, load it from the database
-                let user_balance_doc = mongo_client
-                    .load_user_balance_with_retry(&(from.clone(), ticker_symbol.clone()))
-                    .await
-                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+                // User balance not found in the hashmap, check the 'user_balances_to_insert' hashmap
+                let user_balance =
+                    user_balances_to_insert.get_mut(&(from.clone(), ticker_symbol.clone()));
 
-                if let Some(doc) = user_balance_doc {
-                    user_balances.insert((from.clone(), ticker_symbol.clone()), doc.clone());
-                    user_balances
-                        .get_mut(&(from.clone(), ticker_symbol.clone()))
-                        .unwrap()
-                } else {
-                    // User balance not found in the database either
-                    let reason = "User balance not found";
-                    error!("INVALID: {}", reason);
+                match user_balance {
+                    Some(user_balance) => user_balance,
+                    None => {
+                        // User balance not found in either hashmap, load it from the database
+                        let user_balance_doc = mongo_client
+                            .load_user_balance_with_retry(&(from.clone(), ticker_symbol.clone()))
+                            .await
+                            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-                    self.insert_invalid_tx(reason, invalid_brc20_docs).await?;
+                        if let Some(doc) = user_balance_doc {
+                            user_balances
+                                .insert((from.clone(), ticker_symbol.clone()), doc.clone());
+                            user_balances
+                                .get_mut(&(from.clone(), ticker_symbol.clone()))
+                                .unwrap()
+                        } else {
+                            // User balance not found in the database either
+                            let reason = "User balance not found";
+                            error!("INVALID: {}", reason);
 
-                    return Err(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        reason,
-                    )));
+                            self.insert_invalid_tx(reason, invalid_brc20_docs).await?;
+
+                            return Err(Box::new(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                reason,
+                            )));
+                        }
+                    }
                 }
             }
         };
 
-        info!("user_balance: {:?}", user_balance);
+        info!(
+            "user_balance from validate_inscribe_transfer: {:?}",
+            user_balance
+        );
 
         let available_balance = mongo_client
             .get_double(&user_balance, "available_balance")
@@ -226,6 +239,7 @@ pub async fn handle_transfer_operation(
     sender: Address,
     active_transfers: &mut Option<HashMap<(String, i64), Brc20ActiveTransfer>>,
     user_balances: &mut HashMap<(String, String), Document>,
+    user_balances_to_insert: &mut HashMap<(String, String), Document>,
     invalid_brc20_docs: &mut Vec<Document>,
 ) -> Result<(Brc20Transfer, UserBalanceEntry), Box<dyn std::error::Error>> {
     // Create a new transfer transaction
@@ -238,6 +252,7 @@ pub async fn handle_transfer_operation(
             mongo_client,
             active_transfers,
             user_balances,
+            user_balances_to_insert,
             invalid_brc20_docs,
         )
         .await?;

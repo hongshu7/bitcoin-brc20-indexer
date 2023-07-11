@@ -151,6 +151,7 @@ pub fn transaction_inputs_to_values(client: &Client, inputs: &[TxIn]) -> anyhow:
 pub async fn update_receiver_balance_document(
     mongo_client: &MongoClient,
     user_balance_docs: &mut HashMap<(String, String), Document>,
+    user_balance_docs_to_insert: &mut HashMap<(String, String), Document>,
     user_balance_entry: &UserBalanceEntry,
 ) -> Result<(), anyhow::Error> {
     // Create the key from the address and ticker
@@ -159,41 +160,63 @@ pub async fn update_receiver_balance_document(
         user_balance_entry.tick.clone(),
     );
 
-    // Check if the user balance document exists in the in-memory hashmap
+    // Check if the user balance document exists in the 'user_balance_docs' hashmap
     if let Some(user_balance) = user_balance_docs.get_mut(&key) {
-        // Update the existing user balance document
+        // Document found in 'user_balance_docs', update it
+        info!(
+            "Updating existing user balance document: {:?}",
+            user_balance
+        );
         update_receiver(user_balance, user_balance_entry)?;
     } else {
-        // Load the user balance document with retry
-        let user_balance_doc = mongo_client
-            .load_user_balance_with_retry(&key)
-            .await
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
-
-        if let Some(user_balance) = user_balance_doc {
-            // Update the existing user balance document
-            update_receiver(
-                user_balance_docs
-                    .entry(key.clone())
-                    .or_insert_with(|| user_balance.clone()),
-                user_balance_entry,
-            )?;
+        // Check if the user balance document exists in the 'user_balance_docs_to_insert' hashmap
+        if let Some(user_balance) = user_balance_docs_to_insert.get_mut(&key) {
+            // Document found in 'user_balance_docs_to_insert', update it
+            info!(
+                "Updating existing user balance document (to insert): {:?}",
+                user_balance
+            );
+            update_receiver(user_balance, user_balance_entry)?;
         } else {
-            // Create a new user balance document
-            let new_user_balance = UserBalance {
-                address: user_balance_entry.address.to_string(),
-                tick: user_balance_entry.tick.clone(),
-                overall_balance: user_balance_entry.amt,
-                available_balance: user_balance_entry.amt,
-                transferable_balance: 0.0,
-                block_height: user_balance_entry.block_height,
-            };
+            // Load the user balance document from MongoDB with retry
+            let user_balance_doc = mongo_client
+                .load_user_balance_with_retry(&key)
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-            // Convert the UserBalance to a Document
-            let new_user_balance_doc = new_user_balance.to_document();
+            if let Some(user_balance) = user_balance_doc {
+                // Document found in MongoDB, update it and add it to 'user_balance_docs'
+                info!(
+                    "Updating existing user balance document from MongoDB: {:?}",
+                    user_balance
+                );
+                update_receiver(
+                    user_balance_docs
+                        .entry(key.clone())
+                        .or_insert_with(|| user_balance.clone()),
+                    user_balance_entry,
+                )?;
+            } else {
+                // Document not found, create a new user balance document
+                let new_user_balance = UserBalance {
+                    address: user_balance_entry.address.to_string(),
+                    tick: user_balance_entry.tick.clone(),
+                    overall_balance: user_balance_entry.amt,
+                    available_balance: user_balance_entry.amt,
+                    transferable_balance: 0.0,
+                    block_height: user_balance_entry.block_height,
+                };
 
-            // Insert the new user balance document into the hashmap
-            user_balance_docs.insert(key, new_user_balance_doc);
+                // Convert the UserBalance to a Document
+                let new_user_balance_doc = new_user_balance.to_document();
+
+                // Insert the new user balance document into the 'user_balance_docs_to_insert' hashmap
+                info!(
+                    "Adding new user balance document to insert: {:?}",
+                    new_user_balance_doc
+                );
+                user_balance_docs_to_insert.insert(key, new_user_balance_doc);
+            }
         }
     }
 
@@ -300,6 +323,7 @@ pub fn update_sender_or_inscriber_user_balance_document(
 pub async fn update_sender_user_balance_document(
     mongo_client: &MongoClient,
     user_balances: &mut HashMap<(String, String), Document>,
+    user_balance_docs_to_insert: &mut HashMap<(String, String), Document>,
     user_balance_entry: &UserBalanceEntry,
 ) -> Result<(), anyhow::Error> {
     // Create the key from the address and ticker
@@ -313,23 +337,31 @@ pub async fn update_sender_user_balance_document(
         // Update the existing user balance document
         update_sender_or_inscriber_user_balance_document(user_balance, user_balance_entry)?;
     } else {
-        // Load the user balance document with retry
-        let user_balance_doc = mongo_client
-            .load_user_balance_with_retry(&key)
-            .await
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        // Check if the user balance document exists in the 'user_balance_docs_to_insert' hashmap
+        let user_balance = user_balance_docs_to_insert.get_mut(&key);
 
-        if let Some(user_balance) = user_balance_doc {
+        if let Some(user_balance) = user_balance {
             // Update the existing user balance document
-            update_sender_or_inscriber_user_balance_document(
-                user_balances
-                    .entry(key.clone())
-                    .or_insert_with(|| user_balance.clone()),
-                user_balance_entry,
-            )?;
+            update_sender_or_inscriber_user_balance_document(user_balance, user_balance_entry)?;
         } else {
-            // User balance document not found in the in-memory hashmap or database
-            return Err(anyhow::anyhow!("User balance document not found"));
+            // Load the user balance document with retry
+            let user_balance_doc = mongo_client
+                .load_user_balance_with_retry(&key)
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+            if let Some(user_balance) = user_balance_doc {
+                // Update the existing user balance document
+                update_sender_or_inscriber_user_balance_document(
+                    user_balances
+                        .entry(key.clone())
+                        .or_insert_with(|| user_balance.clone()),
+                    user_balance_entry,
+                )?;
+            } else {
+                // User balance document not found in any hashmap or database
+                return Err(anyhow::anyhow!("User balance document not found"));
+            }
         }
     }
 

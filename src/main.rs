@@ -178,9 +178,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await
         {
             Ok(updated_tickers) => {
-                println!("Reset total_minted for the following tickers:");
+                info!("Reset total_minted for the following tickers:");
                 for ticker in &updated_tickers {
-                    println!("{}", ticker);
+                    info!("{}", ticker);
                 }
                 warn!("Reset total_minted for tickers in: {:?}", start.elapsed());
                 updated_tickers
@@ -224,11 +224,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .rebuild_deleted_user_balances(start_block_height, deleted_balances)
                     .await;
                 if let Err(err) = rebuilt_result {
-                    println!("Failed to rebuild user balances: {:?}", err);
+                    error!("Failed to rebuild user balances: {:?}", err);
                 }
             }
             Err(err) => {
-                println!("Failed to delete user balances: {:?}", err);
+                error!("Failed to delete user balances: {:?}", err);
             }
         }
         warn!("User Balances Rebuilt: {:?}", start.elapsed());

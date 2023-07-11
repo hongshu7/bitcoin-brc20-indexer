@@ -16,7 +16,7 @@ use bitcoincore_rpc::bitcoincore_rpc_json::{
     GetRawTransactionResultVoutScriptPubKey,
 };
 use bitcoincore_rpc::{self, Client, RpcApi};
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use mongodb::{
     bson::{doc, Document},
     options::UpdateOptions,
@@ -74,6 +74,8 @@ pub async fn index_brc20(
                         let mut user_balance_entry_documents = Vec::new();
                         let mut tickers: HashMap<String, Document> = HashMap::new();
                         let mut user_balance_docs: HashMap<(String, String), Document> =
+                            HashMap::new();
+                        let mut user_balance_docs_to_insert: HashMap<(String, String), Document> =
                             HashMap::new();
 
                         // time to process the block
@@ -169,6 +171,7 @@ pub async fn index_brc20(
                                                         match update_receiver_balance_document(
                                                             mongo_client,
                                                             &mut user_balance_docs,
+                                                            &mut user_balance_docs_to_insert,
                                                             &user_balance_entry,
                                                         )
                                                         .await
@@ -201,6 +204,7 @@ pub async fn index_brc20(
                                                 owner,
                                                 &mut active_transfers_opt,
                                                 &mut user_balance_docs,
+                                                &mut user_balance_docs_to_insert,
                                                 &mut invalid_brc20_documents,
                                             )
                                             .await
@@ -247,6 +251,7 @@ pub async fn index_brc20(
                                         &mut transfer_documents,
                                         &mut user_balance_entry_documents,
                                         &mut user_balance_docs,
+                                        &mut user_balance_docs_to_insert,
                                     )
                                     .await
                                     {
@@ -269,11 +274,9 @@ pub async fn index_brc20(
                             process_block_start_time.elapsed()
                         );
 
-                        // Bulk write the updated and new user balance documents back to MongoDB
+                        // write the updated and new user balance documents back to MongoDB
                         if !user_balance_docs.is_empty() {
                             let start = Instant::now();
-                            info!("removing user balance documents with 0 balances");
-
                             let start_len = user_balance_docs.len();
                             // This removes all UserBalance with 0 in all the balance fields.
                             user_balance_docs.retain(|_, user_balance_doc| {
@@ -300,16 +303,16 @@ pub async fn index_brc20(
                                 start.elapsed()
                             );
 
-                            let start = Instant::now();
-                            // Bulk write user balance documents to mongodb
-                            match update_user_balances(mongo_client, user_balance_docs).await {
-                                Ok(_) => {
-                                    warn!(
-                                        "User Balances inserted to MongoDB after block: {} in {:?}",
-                                        len,
-                                        start.elapsed()
-                                    );
-                                }
+                            info!("Inserting User Balances...");
+                            // write user balance documents to mongodb
+                            match update_user_balances(
+                                mongo_client,
+                                user_balance_docs,
+                                user_balance_docs_to_insert,
+                            )
+                            .await
+                            {
+                                Ok(_) => {}
                                 Err(e) => {
                                     error!("Failed to update user balance documents: {:?}", e);
                                 }
@@ -326,14 +329,14 @@ pub async fn index_brc20(
                         )
                         .await?;
 
-                        // convert tickers hashmap to vec<Document>
-                        let tickers: Vec<Document> =
-                            tickers.into_iter().map(|(_, ticker)| ticker).collect();
-
-                        println!("tickers main loop: {:?}", tickers);
-
                         // Bulk update tickers in mongodb
                         if !tickers.is_empty() {
+                            // convert tickers hashmap to vec<Document>
+                            let tickers: Vec<Document> =
+                                tickers.into_iter().map(|(_, ticker)| ticker).collect();
+
+                            debug!("tickers main loop: {:?}", tickers);
+
                             let start = Instant::now();
                             for ticker in &tickers {
                                 let filter_doc = doc! {
@@ -354,7 +357,7 @@ pub async fn index_brc20(
                                     .await?;
                             }
 
-                            info!(
+                            warn!(
                                 "Tickers updated after block: {} in {:?}",
                                 tickers.len(),
                                 start.elapsed()
@@ -444,6 +447,7 @@ pub async fn check_for_transfer_send(
     transfer_documents: &mut Vec<Document>,
     user_balance_entry_documents: &mut Vec<Document>,
     user_balances: &mut HashMap<(String, String), Document>,
+    user_balances_to_insert: &mut HashMap<(String, String), Document>,
 ) -> Result<(), anyhow::Error> {
     let transaction = raw_tx_info.transaction()?;
 
@@ -587,10 +591,22 @@ pub async fn check_for_transfer_send(
         .await?;
 
         // Update user available and transferable balance for the sender in MongoDB
-        update_sender_user_balance_document(mongo_client, user_balances, &user_entry_from).await?;
+        update_sender_user_balance_document(
+            mongo_client,
+            user_balances,
+            user_balances_to_insert,
+            &user_entry_from,
+        )
+        .await?;
 
         // Update user overall balance for the receiver in MongoDB
-        update_receiver_balance_document(mongo_client, user_balances, &user_entry_to).await?;
+        update_receiver_balance_document(
+            mongo_client,
+            user_balances,
+            user_balances_to_insert,
+            &user_entry_to,
+        )
+        .await?;
 
         info!(
             "Transfer inscription found for txid: {}, vout: {}",
