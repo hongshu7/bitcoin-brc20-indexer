@@ -275,7 +275,8 @@ pub async fn index_brc20(
                         );
 
                         // write the updated and new user balance documents back to MongoDB
-                        if !user_balance_docs.is_empty() {
+                        if !user_balance_docs.is_empty() || !user_balance_docs_to_insert.is_empty()
+                        {
                             let start = Instant::now();
                             let start_len = user_balance_docs.len();
                             // This removes all UserBalance with 0 in all the balance fields.

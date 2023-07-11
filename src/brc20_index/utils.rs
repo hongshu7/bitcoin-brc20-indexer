@@ -7,7 +7,7 @@ use super::{
 };
 use bitcoin::{Address, Network, TxIn};
 use bitcoincore_rpc::{bitcoincore_rpc_json::GetRawTransactionResult, Client, RpcApi};
-use log::{debug, error, info};
+use log::{debug, error};
 use mongodb::bson::{Bson, Document};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -163,7 +163,7 @@ pub async fn update_receiver_balance_document(
     // Check if the user balance document exists in the 'user_balance_docs' hashmap
     if let Some(user_balance) = user_balance_docs.get_mut(&key) {
         // Document found in 'user_balance_docs', update it
-        info!(
+        debug!(
             "Updating existing user balance document: {:?}",
             user_balance
         );
@@ -172,7 +172,7 @@ pub async fn update_receiver_balance_document(
         // Check if the user balance document exists in the 'user_balance_docs_to_insert' hashmap
         if let Some(user_balance) = user_balance_docs_to_insert.get_mut(&key) {
             // Document found in 'user_balance_docs_to_insert', update it
-            info!(
+            debug!(
                 "Updating existing user balance document (to insert): {:?}",
                 user_balance
             );
@@ -186,7 +186,7 @@ pub async fn update_receiver_balance_document(
 
             if let Some(user_balance) = user_balance_doc {
                 // Document found in MongoDB, update it and add it to 'user_balance_docs'
-                info!(
+                debug!(
                     "Updating existing user balance document from MongoDB: {:?}",
                     user_balance
                 );
@@ -211,7 +211,7 @@ pub async fn update_receiver_balance_document(
                 let new_user_balance_doc = new_user_balance.to_document();
 
                 // Insert the new user balance document into the 'user_balance_docs_to_insert' hashmap
-                info!(
+                debug!(
                     "Adding new user balance document to insert: {:?}",
                     new_user_balance_doc
                 );
@@ -273,11 +273,6 @@ pub fn update_sender_or_inscriber_user_balance_document(
         .get_f64(consts::OVERALL_BALANCE)
         .unwrap_or_default();
 
-    // Update the values based on the entry type
-    info!(
-        "User balance entry type: {:?}",
-        user_balance_entry.entry_type
-    );
     match user_balance_entry.entry_type {
         UserBalanceEntryType::Send => {
             let updated_transferable_balance = transferable_balance - user_balance_entry.amt;
