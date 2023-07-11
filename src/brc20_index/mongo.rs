@@ -480,103 +480,6 @@ impl MongoClient {
         Ok(())
     }
 
-    pub async fn insert_tickers_total_minted_at_block_height(
-        &self,
-        block_height: i64,
-    ) -> anyhow::Result<()> {
-        // Get all tickers
-        let cursor = self
-            .find_with_retries(consts::COLLECTION_TICKERS, None, None)
-            .await?;
-        let tickers: Vec<Document> = cursor.try_collect().await?;
-
-        // Prepare the tickers array for the new document
-        let mut ticker_docs = Vec::new();
-        for ticker in tickers {
-            // Get the total minted for this ticker
-            let total_minted = ticker.get_f64("total_minted").unwrap_or(0.0);
-
-            // Build a subdocument for this ticker
-            let ticker_doc = doc! {
-                "tick": ticker.get_str("tick")?,
-                "total_minted": total_minted,
-            };
-            ticker_docs.push(ticker_doc);
-        }
-
-        // Build the new document
-        let new_ticker_total_minted_at_block_height = doc! {
-            "block_height": block_height,
-            "tickers": ticker_docs,
-        };
-
-        // Insert the new document into the blocks_completed collection
-        self.insert_document(
-            consts::COLLECTION_TOTAL_MINTED_AT_BLOCK_HEIGHT,
-            new_ticker_total_minted_at_block_height,
-        )
-        .await?;
-
-        Ok(())
-    }
-
-    pub async fn get_ticker_totals_by_block_height(
-        &self,
-        block_height: i64,
-    ) -> Result<Option<Document>, anyhow::Error> {
-        let filter = doc! { "block_height": block_height };
-
-        let result = self
-            .find_one_with_retries(
-                consts::COLLECTION_TOTAL_MINTED_AT_BLOCK_HEIGHT,
-                filter,
-                None,
-            )
-            .await?;
-
-        Ok(result)
-    }
-
-    // Function to update ticker totals
-    pub async fn update_ticker_totals(&self, block_height: i64) -> Result<(), anyhow::Error> {
-        // First, get the document for the given block height
-        let ticker_totals_doc = match self.get_ticker_totals_by_block_height(block_height).await? {
-            Some(doc) => doc,
-            None => {
-                return Err(anyhow::Error::msg(format!(
-                    "No document found for block height {}",
-                    block_height
-                )))
-            }
-        };
-
-        // Get the tickers array from the ticker totals document
-        let ticker_totals = ticker_totals_doc.get_array("tickers")?;
-        let update_options = UpdateOptions::builder().upsert(false).build();
-
-        for ticker_doc in ticker_totals {
-            if let Bson::Document(ticker_doc) = ticker_doc {
-                let tick = ticker_doc.get_str("tick")?;
-                let total_minted = ticker_doc.get_f64("total_minted")?;
-
-                // Update the total_minted field for this ticker in the tickers collection
-                let filter = doc! { "tick": tick };
-                let update =
-                    doc! { "$set": { "total_minted": total_minted, "block_height": block_height } };
-
-                self.update_one_with_retries(
-                    consts::COLLECTION_TICKERS,
-                    filter,
-                    update,
-                    Some(update_options.clone()),
-                )
-                .await?;
-            }
-        }
-
-        Ok(())
-    }
-
     pub async fn load_user_balance_with_retry(
         &self,
         key: &(String, String),
@@ -869,4 +772,101 @@ impl MongoClient {
 
         Ok(())
     }
+
+    // pub async fn insert_tickers_total_minted_at_block_height(
+    //     &self,
+    //     block_height: i64,
+    // ) -> anyhow::Result<()> {
+    //     // Get all tickers
+    //     let cursor = self
+    //         .find_with_retries(consts::COLLECTION_TICKERS, None, None)
+    //         .await?;
+    //     let tickers: Vec<Document> = cursor.try_collect().await?;
+
+    //     // Prepare the tickers array for the new document
+    //     let mut ticker_docs = Vec::new();
+    //     for ticker in tickers {
+    //         // Get the total minted for this ticker
+    //         let total_minted = ticker.get_f64("total_minted").unwrap_or(0.0);
+
+    //         // Build a subdocument for this ticker
+    //         let ticker_doc = doc! {
+    //             "tick": ticker.get_str("tick")?,
+    //             "total_minted": total_minted,
+    //         };
+    //         ticker_docs.push(ticker_doc);
+    //     }
+
+    //     // Build the new document
+    //     let new_ticker_total_minted_at_block_height = doc! {
+    //         "block_height": block_height,
+    //         "tickers": ticker_docs,
+    //     };
+
+    //     // Insert the new document into the blocks_completed collection
+    //     self.insert_document(
+    //         consts::COLLECTION_TOTAL_MINTED_AT_BLOCK_HEIGHT,
+    //         new_ticker_total_minted_at_block_height,
+    //     )
+    //     .await?;
+
+    //     Ok(())
+    // }
+
+    // pub async fn get_ticker_totals_by_block_height(
+    //     &self,
+    //     block_height: i64,
+    // ) -> Result<Option<Document>, anyhow::Error> {
+    //     let filter = doc! { "block_height": block_height };
+
+    //     let result = self
+    //         .find_one_with_retries(
+    //             consts::COLLECTION_TOTAL_MINTED_AT_BLOCK_HEIGHT,
+    //             filter,
+    //             None,
+    //         )
+    //         .await?;
+
+    //     Ok(result)
+    // }
+
+    // // Function to update ticker totals
+    // pub async fn update_ticker_totals(&self, block_height: i64) -> Result<(), anyhow::Error> {
+    //     // First, get the document for the given block height
+    //     let ticker_totals_doc = match self.get_ticker_totals_by_block_height(block_height).await? {
+    //         Some(doc) => doc,
+    //         None => {
+    //             return Err(anyhow::Error::msg(format!(
+    //                 "No document found for block height {}",
+    //                 block_height
+    //             )))
+    //         }
+    //     };
+
+    //     // Get the tickers array from the ticker totals document
+    //     let ticker_totals = ticker_totals_doc.get_array("tickers")?;
+    //     let update_options = UpdateOptions::builder().upsert(false).build();
+
+    //     for ticker_doc in ticker_totals {
+    //         if let Bson::Document(ticker_doc) = ticker_doc {
+    //             let tick = ticker_doc.get_str("tick")?;
+    //             let total_minted = ticker_doc.get_f64("total_minted")?;
+
+    //             // Update the total_minted field for this ticker in the tickers collection
+    //             let filter = doc! { "tick": tick };
+    //             let update =
+    //                 doc! { "$set": { "total_minted": total_minted, "block_height": block_height } };
+
+    //             self.update_one_with_retries(
+    //                 consts::COLLECTION_TICKERS,
+    //                 filter,
+    //                 update,
+    //                 Some(update_options.clone()),
+    //             )
+    //             .await?;
+    //         }
+    //     }
+
+    //     Ok(())
+    // }
 }

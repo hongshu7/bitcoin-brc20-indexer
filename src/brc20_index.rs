@@ -383,20 +383,6 @@ pub async fn index_brc20(
                             }
                         }
 
-                        // store into a new collection a document that has all of the tickers
-                        // and their total_minted at this block height
-                        let start = Instant::now();
-                        mongo_client
-                            .insert_tickers_total_minted_at_block_height(
-                                current_block_height.into(),
-                            )
-                            .await?;
-
-                        warn!(
-                            "Tickers total minted updated to MongoDB after block: {:?}",
-                            start.elapsed()
-                        );
-
                         // After successfully processing the block, store the current_block_height
                         match mongo_client
                             .store_completed_block(current_block_height.into())
