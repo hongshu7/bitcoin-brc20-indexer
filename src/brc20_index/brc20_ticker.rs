@@ -1,5 +1,5 @@
 use super::{deploy::Brc20Deploy, ToDocument};
-use mongodb::bson::{doc, Bson, DateTime, Document};
+use mongodb::bson::{doc, Document};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
@@ -21,7 +21,7 @@ impl ToDocument for Brc20Ticker {
             "decimals": self.decimals as i64,
             "total_minted": self.total_minted,
             "block_height": self.deploy.block_height,
-            "created_at": Bson::DateTime(DateTime::now())
+            "updated_block_height": self.deploy.block_height,
         }
     }
 }

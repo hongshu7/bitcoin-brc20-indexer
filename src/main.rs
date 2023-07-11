@@ -187,24 +187,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("Deleting User Balances...");
         let start = Instant::now();
         //delete user balance collection
-        mongo_client
-            .drop_collection(consts::COLLECTION_USER_BALANCES)
-            .await?;
+        let deleted_user_balances = mongo_client
+            .delete_user_balances_by_block_height(start_block_height)
+            .await;
+        info!("Deleted User Balances: {:?}", deleted_user_balances);
 
         warn!("User Balances Deleted: {:?}", start.elapsed());
 
         // rebuild userbalances
         info!("Rebuilding User Balances...");
         let start = Instant::now();
-        match mongo_client
-            .rebuild_user_balances(start_block_height - 1)
-            .await
-        {
-            Ok(_) => {
-                warn!("User Balances rebuilt: {:?}", start.elapsed());
+        match deleted_user_balances {
+            Ok(deleted_balances) => {
+                // Call the `rebuild_deleted_user_balances` function
+                let rebuilt_result = mongo_client
+                    .rebuild_deleted_user_balances(start_block_height, deleted_balances)
+                    .await;
+                if let Err(err) = rebuilt_result {
+                    println!("Failed to rebuild user balances: {:?}", err);
+                }
             }
-            Err(e) => error!("Error recreating userbalances: {:?}", e),
-        };
+            Err(err) => {
+                println!("Failed to delete user balances: {:?}", err);
+            }
+        }
+        warn!("User Balances Rebuilt: {:?}", start.elapsed());
     }
 
     // LFG!

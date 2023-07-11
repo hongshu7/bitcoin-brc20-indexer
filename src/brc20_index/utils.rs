@@ -1,12 +1,13 @@
 use super::{
     brc20_ticker::Brc20Ticker,
     consts,
-    user_balance::{UserBalance, UserBalanceEntry},
+    mongo::MongoClient,
+    user_balance::{UserBalance, UserBalanceEntry, UserBalanceEntryType},
     Brc20Inscription, ToDocument,
 };
 use bitcoin::{Address, Network, TxIn};
 use bitcoincore_rpc::{bitcoincore_rpc_json::GetRawTransactionResult, Client, RpcApi};
-use log::{debug, error};
+use log::{debug, error, info};
 use mongodb::bson::{Bson, Document};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -147,7 +148,8 @@ pub fn transaction_inputs_to_values(client: &Client, inputs: &[TxIn]) -> anyhow:
     }
 }
 
-pub fn update_receiver_balance_document(
+pub async fn update_receiver_balance_document(
+    mongo_client: &MongoClient,
     user_balance_docs: &mut HashMap<(String, String), Document>,
     user_balance_entry: &UserBalanceEntry,
 ) -> Result<(), anyhow::Error> {
@@ -157,31 +159,57 @@ pub fn update_receiver_balance_document(
         user_balance_entry.tick.clone(),
     );
 
-    // Get the document from the hashmap or insert a new one if it doesn't exist
-    let user_balance = user_balance_docs.entry(key).or_insert_with(|| {
-        // If the UserBalance doesn't exist, create a new one with the given values
-        let new_balance = UserBalance {
-            address: user_balance_entry.address.to_string(),
-            tick: user_balance_entry.tick.clone(),
-            overall_balance: user_balance_entry.amt,
-            available_balance: user_balance_entry.amt,
-            transferable_balance: 0.0,
-            block_height: user_balance_entry.block_height,
-        };
+    // Check if the user balance document exists in the in-memory hashmap
+    if let Some(user_balance) = user_balance_docs.get_mut(&key) {
+        // Update the existing user balance document
+        update_receiver(user_balance, user_balance_entry)?;
+    } else {
+        // Load the user balance document with retry
+        let user_balance_doc = mongo_client
+            .load_user_balance_with_retry(&key)
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        // Convert the UserBalance to a Document
-        new_balance.to_document()
-    });
+        if let Some(user_balance) = user_balance_doc {
+            // Update the existing user balance document
+            update_receiver(
+                user_balance_docs
+                    .entry(key.clone())
+                    .or_insert_with(|| user_balance.clone()),
+                user_balance_entry,
+            )?;
+        } else {
+            // Create a new user balance document
+            let new_user_balance = UserBalance {
+                address: user_balance_entry.address.to_string(),
+                tick: user_balance_entry.tick.clone(),
+                overall_balance: user_balance_entry.amt,
+                available_balance: user_balance_entry.amt,
+                transferable_balance: 0.0,
+                block_height: user_balance_entry.block_height,
+            };
 
-    // Update the existing document
-    // Get the overall and available balance values
+            // Convert the UserBalance to a Document
+            let new_user_balance_doc = new_user_balance.to_document();
+
+            // Insert the new user balance document into the hashmap
+            user_balance_docs.insert(key, new_user_balance_doc);
+        }
+    }
+
+    Ok(())
+}
+
+fn update_receiver(
+    user_balance: &mut Document,
+    user_balance_entry: &UserBalanceEntry,
+) -> Result<(), anyhow::Error> {
+    // Get the overall and available balance values from the document
     let overall_balance = user_balance
-        .get(consts::OVERALL_BALANCE)
-        .and_then(Bson::as_f64)
+        .get_f64(consts::OVERALL_BALANCE)
         .unwrap_or_default();
     let available_balance = user_balance
-        .get(consts::AVAILABLE_BALANCE)
-        .and_then(Bson::as_f64)
+        .get_f64(consts::AVAILABLE_BALANCE)
         .unwrap_or_default();
 
     // Update the values
@@ -206,7 +234,70 @@ pub fn update_receiver_balance_document(
     Ok(())
 }
 
-pub fn update_sender_user_balance_document(
+pub fn update_sender_or_inscriber_user_balance_document(
+    user_balance: &mut Document,
+    user_balance_entry: &UserBalanceEntry,
+) -> Result<(), anyhow::Error> {
+    // Get the available balance, transferable balance, and overall balance values
+    let available_balance = user_balance
+        .get_f64(consts::AVAILABLE_BALANCE)
+        .unwrap_or_default();
+    let transferable_balance = user_balance
+        .get_f64(consts::TRANSFERABLE_BALANCE)
+        .unwrap_or_default();
+    let overall_balance = user_balance
+        .get_f64(consts::OVERALL_BALANCE)
+        .unwrap_or_default();
+
+    // Update the values based on the entry type
+    info!(
+        "User balance entry type: {:?}",
+        user_balance_entry.entry_type
+    );
+    match user_balance_entry.entry_type {
+        UserBalanceEntryType::Send => {
+            let updated_transferable_balance = transferable_balance - user_balance_entry.amt;
+            let updated_overall_balance = overall_balance - user_balance_entry.amt;
+
+            user_balance.insert(
+                consts::TRANSFERABLE_BALANCE.to_string(),
+                Bson::Double(updated_transferable_balance),
+            );
+            user_balance.insert(
+                consts::OVERALL_BALANCE.to_string(),
+                Bson::Double(updated_overall_balance),
+            );
+        }
+        UserBalanceEntryType::Inscription => {
+            let updated_available_balance = available_balance - user_balance_entry.amt;
+            let updated_transferable_balance = transferable_balance + user_balance_entry.amt;
+
+            user_balance.insert(
+                consts::AVAILABLE_BALANCE.to_string(),
+                Bson::Double(updated_available_balance),
+            );
+            user_balance.insert(
+                consts::TRANSFERABLE_BALANCE.to_string(),
+                Bson::Double(updated_transferable_balance),
+            );
+        }
+        _ => {
+            // Other entry types are not applicable for this function
+            return Err(anyhow::anyhow!("Invalid entry type"));
+        }
+    }
+
+    // Update the block height
+    user_balance.insert(
+        consts::KEY_BLOCK_HEIGHT.to_string(),
+        Bson::Int64(user_balance_entry.block_height as i64),
+    );
+
+    Ok(())
+}
+
+pub async fn update_sender_user_balance_document(
+    mongo_client: &MongoClient,
     user_balances: &mut HashMap<(String, String), Document>,
     user_balance_entry: &UserBalanceEntry,
 ) -> Result<(), anyhow::Error> {
@@ -216,39 +307,30 @@ pub fn update_sender_user_balance_document(
         user_balance_entry.tick.clone(),
     );
 
-    // Get the document from the hashmap or return an error if it doesn't exist
-    let user_balance = user_balances
-        .get_mut(&key)
-        .ok_or_else(|| anyhow::anyhow!("User balance document not found in memory"))?;
+    // Check if the user balance document exists in the in-memory hashmap
+    if let Some(user_balance) = user_balances.get_mut(&key) {
+        // Update the existing user balance document
+        update_sender_or_inscriber_user_balance_document(user_balance, user_balance_entry)?;
+    } else {
+        // Load the user balance document with retry
+        let user_balance_doc = mongo_client
+            .load_user_balance_with_retry(&key)
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-    // Get the overall balance and transferable balance values
-    let overall_balance = user_balance
-        .get(consts::OVERALL_BALANCE)
-        .and_then(Bson::as_f64)
-        .unwrap_or_default();
-    let transferable_balance = user_balance
-        .get(consts::TRANSFERABLE_BALANCE)
-        .and_then(Bson::as_f64)
-        .unwrap_or_default();
-
-    // Update the values
-    let updated_overall_balance = overall_balance - user_balance_entry.amt;
-    let updated_transferable_balance = transferable_balance - user_balance_entry.amt;
-
-    // Update the document
-    user_balance.insert(
-        consts::OVERALL_BALANCE.to_string(),
-        Bson::Double(updated_overall_balance),
-    );
-    user_balance.insert(
-        consts::TRANSFERABLE_BALANCE.to_string(),
-        Bson::Double(updated_transferable_balance),
-    );
-    // Update the block height
-    user_balance.insert(
-        consts::KEY_BLOCK_HEIGHT.to_string(),
-        Bson::Int64(user_balance_entry.block_height as i64),
-    );
+        if let Some(user_balance) = user_balance_doc {
+            // Update the existing user balance document
+            update_sender_or_inscriber_user_balance_document(
+                user_balances
+                    .entry(key.clone())
+                    .or_insert_with(|| user_balance.clone()),
+                user_balance_entry,
+            )?;
+        } else {
+            // User balance document not found in the in-memory hashmap or database
+            return Err(anyhow::anyhow!("User balance document not found"));
+        }
+    }
 
     Ok(())
 }

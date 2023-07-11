@@ -1,6 +1,9 @@
-use super::ToDocument;
+use super::mongo::MongoClient;
+use super::{consts, ToDocument};
 use mongodb::bson::{doc, Document};
+use mongodb::options::UpdateOptions;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::fmt;
 
 #[derive(Debug, Clone, Serialize)]
@@ -32,7 +35,7 @@ pub struct UserBalanceEntry {
     pub tick: String,
     pub block_height: u64,
     pub amt: f64,
-    pub entry_type: String,
+    pub entry_type: UserBalanceEntryType,
 }
 
 impl Default for UserBalanceEntry {
@@ -42,7 +45,7 @@ impl Default for UserBalanceEntry {
             tick: String::default(),
             block_height: 0,
             amt: 0.0,
-            entry_type: String::default(),
+            entry_type: UserBalanceEntryType::Inscription,
         }
     }
 }
@@ -60,7 +63,7 @@ impl UserBalanceEntry {
             tick,
             block_height,
             amt: amount,
-            entry_type: entry_type.to_string(), // Convert enum variant to String using Display trait
+            entry_type,
         };
         entry
     }
@@ -73,7 +76,7 @@ impl ToDocument for UserBalanceEntry {
             "tick": &self.tick,
             "block_height": self.block_height as i64,
             "amt": self.amt,
-            "entry_type": &self.entry_type,
+            "entry_type": &self.entry_type.to_string(),
         }
     }
 }
@@ -106,4 +109,35 @@ impl From<&str> for UserBalanceEntryType {
             _ => panic!("Invalid UserBalanceEntryType"),
         }
     }
+}
+
+pub async fn update_user_balances(
+    mongo_client: &MongoClient,
+    user_balance_docs: HashMap<(String, String), Document>,
+) -> Result<(), anyhow::Error> {
+    let collection_name = consts::COLLECTION_USER_BALANCES;
+
+    for (key, document) in user_balance_docs {
+        let filter = doc! {
+            "address": key.0,
+            "tick": key.1,
+        };
+
+        let update = doc! {
+            "$set": document,
+        };
+
+        let update_options = Some(UpdateOptions::builder().upsert(true).build());
+
+        mongo_client
+            .update_one_with_retries(
+                collection_name,
+                filter.clone(),
+                update.clone(),
+                update_options,
+            )
+            .await?;
+    }
+
+    Ok(())
 }
