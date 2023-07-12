@@ -175,6 +175,7 @@ async fn update_ticker_total_minted(
     mint_amount: f64,
     tickers: &mut HashMap<String, Document>,
     mongo_client: &MongoClient,
+    block_height: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Check if the hashmap contains the ticker
     if let Some(ticker_doc) = get_ticker(tickers, ticker_symbol, mongo_client).await {
@@ -188,6 +189,7 @@ async fn update_ticker_total_minted(
         // Create a new document with the updated total_minted
         let mut updated_ticker_doc = ticker_doc.clone();
         updated_ticker_doc.insert("total_minted", Bson::Double(new_total_minted));
+        updated_ticker_doc.insert("updated_at_block", block_height as i32);
 
         // Replace the old ticker_doc in the hashmap with the updated one
         tickers.insert(ticker_symbol.clone(), updated_ticker_doc);
@@ -200,6 +202,7 @@ pub async fn update_balances_and_ticker(
     mongo_client: &MongoClient,
     validated_mint_tx: &Brc20Mint,
     tickers: &mut HashMap<String, Document>,
+    block_height: u32,
 ) -> Result<UserBalanceEntry, Box<dyn std::error::Error>> {
     // Update total minted tokens for this ticker in MongoDB and in-memory hashmap
     update_ticker_total_minted(
@@ -207,6 +210,7 @@ pub async fn update_balances_and_ticker(
         validated_mint_tx.amt,
         tickers,
         mongo_client,
+        block_height,
     )
     .await?;
 
@@ -245,15 +249,13 @@ pub async fn handle_mint_operation(
 
     // Check if the mint operation is valid.
     if validated_mint_tx.is_valid() {
-        info!(
-            "VALID: Mint inscription added: {}",
-            validated_mint_tx.get_mint()
-        );
+        info!("VALID: Mint inscription: {}", validated_mint_tx.get_mint());
         info!("TO Address: {:?}", validated_mint_tx.to);
 
         // update_balances_and_ticker
         user_balance_entry =
-            update_balances_and_ticker(mongo_client, &validated_mint_tx, tickers).await?;
+            update_balances_and_ticker(mongo_client, &validated_mint_tx, tickers, block_height)
+                .await?;
     }
 
     Ok((validated_mint_tx, user_balance_entry))

@@ -15,8 +15,11 @@ use bitcoincore_rpc::bitcoincore_rpc_json::{
     GetRawTransactionResultVoutScriptPubKey,
 };
 use bitcoincore_rpc::{self, Client, RpcApi};
-use log::{error, info, warn};
-use mongodb::bson::{doc, Document};
+use log::{debug, error, info, warn};
+use mongodb::{
+    bson::{doc, Document},
+    options::UpdateOptions,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -52,7 +55,6 @@ pub async fn index_brc20(
                             current_block_hash, length, current_block_height
                         );
 
-                        let start = Instant::now();
                         let mut active_transfers_opt =
                             mongo_client.load_active_transfers_with_retry().await?;
 
@@ -60,18 +62,6 @@ pub async fn index_brc20(
                         if active_transfers_opt.is_none() {
                             active_transfers_opt = Some(HashMap::new());
                         }
-                        warn!("Active Transfers loaded: {:?}", start.elapsed());
-
-                        let start = Instant::now();
-                        let mut user_balance_docs =
-                            match mongo_client.load_user_balances_with_retry().await {
-                                Ok(docs) => docs,
-                                Err(e) => {
-                                    error!("Failed to get user balances by block height: {:?}", e);
-                                    HashMap::new()
-                                }
-                            };
-                        warn!("User Balances loaded: {:?}", start.elapsed());
 
                         // Vectors for mongo bulk writes
                         let mut mint_documents = Vec::new();
@@ -80,6 +70,10 @@ pub async fn index_brc20(
                         let mut invalid_brc20_documents = Vec::new();
                         let mut user_balance_entry_documents = Vec::new();
                         let mut tickers: HashMap<String, Document> = HashMap::new();
+                        let mut user_balance_docs_to_update: HashMap<(String, String), Document> =
+                            HashMap::new();
+                        let mut user_balance_docs_to_insert: HashMap<(String, String), Document> =
+                            HashMap::new();
 
                         // time to process the block
                         let process_block_start_time = Instant::now();
@@ -172,9 +166,13 @@ pub async fn index_brc20(
 
                                                         // Update user balance docs
                                                         match update_receiver_balance_document(
-                                                            &mut user_balance_docs,
+                                                            mongo_client,
+                                                            &mut user_balance_docs_to_update,
+                                                            &mut user_balance_docs_to_insert,
                                                             &user_balance_entry,
-                                                        ) {
+                                                        )
+                                                        .await
+                                                        {
                                                             Ok(_) => {}
                                                             Err(e) => {
                                                                 error!(
@@ -202,7 +200,8 @@ pub async fn index_brc20(
                                                 &raw_tx,
                                                 owner,
                                                 &mut active_transfers_opt,
-                                                &mut user_balance_docs,
+                                                &mut user_balance_docs_to_update,
+                                                &mut user_balance_docs_to_insert,
                                                 &mut invalid_brc20_documents,
                                             )
                                             .await
@@ -248,7 +247,8 @@ pub async fn index_brc20(
                                         active_transfers,
                                         &mut transfer_documents,
                                         &mut user_balance_entry_documents,
-                                        &mut user_balance_docs,
+                                        &mut user_balance_docs_to_update,
+                                        &mut user_balance_docs_to_insert,
                                     )
                                     .await
                                     {
@@ -266,15 +266,19 @@ pub async fn index_brc20(
 
                         // time to process the block
                         warn!(
-                            "{} Transactions Processed in: {:?}",
+                            "Transactions Processed: {} in {:?}",
                             tx_height,
                             process_block_start_time.elapsed()
                         );
 
-                        // Bulk write the updated and new user balance documents back to MongoDB
-                        if !user_balance_docs.is_empty() {
+                        // write the updated and new user balance documents back to MongoDB
+                        if !user_balance_docs_to_update.is_empty()
+                            || !user_balance_docs_to_insert.is_empty()
+                        {
+                            let start = Instant::now();
+                            let start_len = user_balance_docs_to_update.len();
                             // This removes all UserBalance with 0 in all the balance fields.
-                            user_balance_docs.retain(|_, user_balance_doc| {
+                            user_balance_docs_to_update.retain(|_, user_balance_doc| {
                                 let overall_balance = user_balance_doc
                                     .get_f64("overall_balance")
                                     .unwrap_or_default();
@@ -290,27 +294,26 @@ pub async fn index_brc20(
                                     || transferable_balance != 0.0
                             });
 
-                            let start = Instant::now();
-                            // drop mongodb collection right before inserting active transfers
-                            mongo_client
-                                .drop_collection(consts::COLLECTION_USER_BALANCES)
-                                .await?;
-                            warn!("User Balances Deleted after block: {:?}", start.elapsed());
+                            let len = user_balance_docs_to_update.len();
 
-                            let start = Instant::now();
-                            // Bulk write user balance documents to mongodb
+                            warn!(
+                                "Zeroed User Balances removed: {} in {:?}",
+                                start_len - len,
+                                start.elapsed()
+                            );
+
+                            info!("Inserting User Balances...");
+                            // write user balance documents to mongodb
                             match mongo_client
-                                .insert_user_balances_with_retries(user_balance_docs.clone()) // Removed .clone() here
+                                .update_user_balances(
+                                    user_balance_docs_to_update,
+                                    user_balance_docs_to_insert,
+                                )
                                 .await
                             {
-                                Ok(_) => {
-                                    warn!(
-                                        "User Balances inserted after block: {:?}",
-                                        start.elapsed()
-                                    )
-                                }
+                                Ok(_) => {}
                                 Err(e) => {
-                                    error!("Failed to update user balance documents: {:?}", e)
+                                    error!("Failed to update user balance documents: {:?}", e);
                                 }
                             }
                         }
@@ -325,12 +328,14 @@ pub async fn index_brc20(
                         )
                         .await?;
 
-                        // convert tickers hashmap to vec<Document>
-                        let tickers: Vec<Document> =
-                            tickers.into_iter().map(|(_, ticker)| ticker).collect();
-
                         // Bulk update tickers in mongodb
                         if !tickers.is_empty() {
+                            // convert tickers hashmap to vec<Document>
+                            let tickers: Vec<Document> =
+                                tickers.into_iter().map(|(_, ticker)| ticker).collect();
+
+                            debug!("tickers main loop: {:?}", tickers);
+
                             let start = Instant::now();
                             for ticker in &tickers {
                                 let filter_doc = doc! {
@@ -352,51 +357,33 @@ pub async fn index_brc20(
                             }
 
                             warn!(
-                                "{} Tickers updated after block: {:?}",
+                                "Tickers updated after block: {} in {:?}",
                                 tickers.len(),
                                 start.elapsed()
                             );
                         }
 
-                        let start = Instant::now();
                         // drop mongodb collection right before inserting active transfers
                         mongo_client
                             .drop_collection(consts::COLLECTION_BRC20_ACTIVE_TRANSFERS)
                             .await?;
-                        warn!(
-                            "Active Transfers Deleted after block: {:?}",
-                            start.elapsed()
-                        );
 
                         // store active transfer collection, if any
                         if let Some(active_transfers) = active_transfers_opt {
+                            let length = active_transfers.len();
                             if !active_transfers.is_empty() {
                                 let start = Instant::now();
                                 mongo_client
                                     .insert_active_transfers_to_mongodb(active_transfers)
                                     .await?;
 
-                                warn!(
-                                    "Active Transfers inserted after block: {:?}",
+                                info!(
+                                    "Active Transfers inserted to MongoDB after block: {} in {:?}",
+                                    length,
                                     start.elapsed()
                                 );
                             }
                         }
-
-                        // store into a new collection a document that has all of the tickers
-                        // and their total_minted at this block height
-                        let start = Instant::now();
-                        mongo_client
-                            .insert_tickers_total_minted_and_user_balances_at_block_height(
-                                current_block_height.into(),
-                                &user_balance_docs,
-                            )
-                            .await?;
-
-                        warn!(
-                            "Tickers and User Balances inserted after block: {:?}",
-                            start.elapsed()
-                        );
 
                         // After successfully processing the block, store the current_block_height
                         match mongo_client
@@ -426,6 +413,29 @@ pub async fn index_brc20(
     }
 }
 
+/// Checks for transfer send events in a transaction and performs the necessary updates in MongoDB.
+///
+/// This function checks if there are transfer send events in the given transaction and performs the following actions:
+/// - Updates user balances and entries for the sender and receiver.
+/// - Updates the transfer document in MongoDB, either by updating an existing document or inserting a new one.
+/// - Updates user available and transferable balances for the sender in MongoDB.
+/// - Updates user overall balance for the receiver in MongoDB.
+///
+/// # Arguments
+///
+/// * `mongo_client` - The MongoDB client for performing database operations.
+/// * `rpc` - The RPC client for interacting with the blockchain.
+/// * `raw_tx_info` - The raw transaction information.
+/// * `block_height` - The block height of the transaction.
+/// * `tx_height` - The transaction height.
+/// * `active_transfers` - A hashmap containing active transfers.
+/// * `transfer_documents` - A vector of transfer documents.
+/// * `user_balance_entry_documents` - A vector of user balance entry documents.
+/// * `user_balances` - A hashmap containing user balances.
+///
+/// # Returns
+///
+/// This function returns `Ok(())` if the operation is successful, or an error if any error occurs during the process.
 pub async fn check_for_transfer_send(
     mongo_client: &MongoClient,
     rpc: &Client,
@@ -435,7 +445,8 @@ pub async fn check_for_transfer_send(
     active_transfers: &mut HashMap<(String, i64), Brc20ActiveTransfer>,
     transfer_documents: &mut Vec<Document>,
     user_balance_entry_documents: &mut Vec<Document>,
-    user_balances: &mut HashMap<(String, String), Document>,
+    user_balance_docs_to_update: &mut HashMap<(String, String), Document>,
+    user_balances_to_insert: &mut HashMap<(String, String), Document>,
 ) -> Result<(), anyhow::Error> {
     let transaction = raw_tx_info.transaction()?;
 
@@ -450,29 +461,35 @@ pub async fn check_for_transfer_send(
         } else {
             continue;
         }
-
+        info!("Transfer Send Found: {:?}", key);
         // Check if transfer exists in the transfer_documents vector in memory
-        let transfer_doc_opt = transfer_documents.iter().find(|doc| {
-            doc.get_str("tx.txid").ok() == Some(&txid) && doc.get_i64("tx.vout").ok() == Some(vout)
+        let index = transfer_documents.iter().position(|doc| {
+            if let Ok(tx) = doc.get_document("tx") {
+                if let Ok(txid) = tx.get_str("txid") {
+                    return txid == txid;
+                }
+            }
+            false
         });
 
-        let transfer_doc = match transfer_doc_opt {
-            Some(transfer_doc) => transfer_doc.clone(),
-            None => {
-                // get mongo doc for transfers collection that matches the txid and vout
-                let filter_doc = doc! {"tx.txid": txid.clone()};
-                match mongo_client
-                    .get_document_by_filter(consts::COLLECTION_TRANSFERS, filter_doc)
-                    .await?
-                {
-                    Some(doc) => doc,
-                    None => {
-                        error!(
-                            "Transfer inscription not found for txid: {}, vout: {}",
-                            txid, vout
-                        );
-                        continue;
-                    }
+        let transfer_doc = if let Some(index) = index {
+            // Document found in the vector, remove it from the vector
+            transfer_documents.remove(index)
+        } else {
+            info!("Checking in MongoDB: {:?}", key);
+            // Document not found in the vector, fetch it from MongoDB
+            let filter_doc = doc! {"tx.txid": txid.clone()};
+            match mongo_client
+                .get_document_by_filter(consts::COLLECTION_TRANSFERS, filter_doc)
+                .await?
+            {
+                Some(doc) => doc,
+                None => {
+                    error!(
+                        "Transfer inscription not found for txid: {}, vout: {}",
+                        txid, vout
+                    );
+                    continue;
                 }
             }
         };
@@ -560,24 +577,35 @@ pub async fn check_for_transfer_send(
         user_balance_entry_documents.push(user_entry_to.to_document());
 
         //-------------MONGODB-------------------//
-        // Update the transfer document in MongoDB (check in memory first)
+        // Pass the transfer document to the update_transfer_document function
         update_transfer_document(
             mongo_client,
+            transfer_doc,
             &txid,
-            vout,
             &receiver_address,
             block_height.try_into().unwrap(),
             tx_height,
             &raw_tx_info,
-            transfer_documents,
         )
         .await?;
 
         // Update user available and transferable balance for the sender in MongoDB
-        update_sender_user_balance_document(user_balances, &user_entry_from)?;
+        update_sender_user_balance_document(
+            mongo_client,
+            user_balance_docs_to_update,
+            user_balances_to_insert,
+            &user_entry_from,
+        )
+        .await?;
 
         // Update user overall balance for the receiver in MongoDB
-        update_receiver_balance_document(user_balances, &user_entry_to)?;
+        update_receiver_balance_document(
+            mongo_client,
+            user_balance_docs_to_update,
+            user_balances_to_insert,
+            &user_entry_to,
+        )
+        .await?;
 
         info!(
             "Transfer inscription found for txid: {}, vout: {}",
@@ -617,7 +645,11 @@ pub async fn insert_documents_to_mongo_after_each_block(
         mongo_client
             .insert_many_with_retries(consts::COLLECTION_MINTS, &mint_documents)
             .await?;
-        warn!("Mints inserted after block: {:?}", start.elapsed());
+        warn!(
+            "Mints inserted after block: {} in {:?}",
+            mint_documents.len(),
+            start.elapsed()
+        );
     }
 
     // If there are transfer documents, insert them into the transfers collection
@@ -626,7 +658,11 @@ pub async fn insert_documents_to_mongo_after_each_block(
         mongo_client
             .insert_many_with_retries(consts::COLLECTION_TRANSFERS, &transfer_documents)
             .await?;
-        warn!("Transfers inserted after block: {:?}", start.elapsed());
+        warn!(
+            "Transfers inserted after block: {} in {:?}",
+            transfer_documents.len(),
+            start.elapsed()
+        );
     }
 
     // If there are deploy documents, insert them into the deploys collection
@@ -635,7 +671,11 @@ pub async fn insert_documents_to_mongo_after_each_block(
         mongo_client
             .insert_many_with_retries(consts::COLLECTION_DEPLOYS, &deploy_documents)
             .await?;
-        warn!("Deploys inserted after block: {:?}", start.elapsed());
+        warn!(
+            "Deploys inserted after block: {} in {:?}",
+            deploy_documents.len(),
+            start.elapsed()
+        );
     }
 
     // If there are invalid BRC20 documents, insert them into the invalids collection
@@ -644,7 +684,11 @@ pub async fn insert_documents_to_mongo_after_each_block(
         mongo_client
             .insert_many_with_retries(consts::COLLECTION_INVALIDS, &invalid_brc20_documents)
             .await?;
-        warn!("Invalids inserted after block: {:?}", start.elapsed());
+        warn!(
+            "Invalids inserted after block: {} in {:?}",
+            invalid_brc20_documents.len(),
+            start.elapsed()
+        );
     }
 
     // If there are user balance entry documents, insert them into the user balance entry collection
@@ -657,7 +701,8 @@ pub async fn insert_documents_to_mongo_after_each_block(
             )
             .await?;
         warn!(
-            "User Balance Entries inserted after block: {:?}",
+            "User Balance Entries inserted after block: {} in {:?}",
+            user_balance_entry_documents.len(),
             start.elapsed()
         );
     }
@@ -770,37 +815,38 @@ impl ToDocument for GetRawTransactionResultVout {
 
 pub async fn update_transfer_document(
     mongo_client: &MongoClient,
+    transfer_doc: Document,
     tx_id: &str,
-    vout: i64,
-    receiver_address: &String,
+    receiver_address: &str,
     send_block_height: i64,
     send_tx_height: i64,
     send_tx: &GetRawTransactionResult,
-    transfer_documents: &mut Vec<Document>,
 ) -> Result<(), anyhow::Error> {
-    // Check if the transfer exists in the transfer_documents vector
-    if let Some(transfer_doc) = transfer_documents.iter_mut().find(|doc| {
-        doc.get_str("tx.txid").ok() == Some(tx_id) && doc.get_i64("tx.vout").ok() == Some(vout)
-    }) {
-        // If it does, update it
-        transfer_doc.insert("to", receiver_address);
-        transfer_doc.insert("send_tx", send_tx.to_document());
-    } else {
-        // If it doesn't exist in the transfer_documents vector, update it in MongoDB
-        let update_doc = doc! {
-            "$set": {
-                "to": receiver_address,
-                "send_tx": send_tx.to_document(),
-                "send_block_height": send_block_height,
-                "send_tx_height": send_tx_height,
-            }
-        };
+    // Update the fields of the document
+    let updated_doc = {
+        let mut updated_doc = transfer_doc;
+        updated_doc.insert("to", receiver_address);
+        updated_doc.insert("send_tx", send_tx.to_document());
+        updated_doc.insert("send_block_height", send_block_height);
+        updated_doc.insert("send_tx_height", send_tx_height);
+        updated_doc
+    };
 
-        // Update the document in MongoDB
-        mongo_client
-            .update_document_by_field(consts::COLLECTION_TRANSFERS, "tx.txid", tx_id, update_doc)
-            .await?;
-    }
+    // Update or insert the document in MongoDB
+    // We can save to MongoDB without worrying about needing to
+    // delete in case of restart, they will just be overwritten by the new ones
+    // and will not affect any balances that need to be recalculated
+    let filter = doc! { "tx.txid": tx_id };
+    let update_doc = doc! { "$set": updated_doc };
+    let options = UpdateOptions::builder().upsert(true).build();
+    mongo_client
+        .update_one_with_retries(
+            consts::COLLECTION_TRANSFERS,
+            filter,
+            update_doc,
+            Some(options),
+        )
+        .await?;
 
     Ok(())
 }

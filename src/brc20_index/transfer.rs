@@ -2,10 +2,13 @@ use super::{
     consts, invalid_brc20::InvalidBrc20Tx, mongo::MongoClient, user_balance::UserBalanceEntry,
     Brc20Inscription,
 };
-use crate::brc20_index::{user_balance::UserBalanceEntryType, ToDocument};
+use crate::brc20_index::{
+    user_balance::UserBalanceEntryType, utils::update_sender_or_inscriber_user_balance_document,
+    ToDocument,
+};
 use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
-use log::{error, info};
+use log::{debug, error, info};
 use mongodb::bson::{doc, Bson, DateTime, Document};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -72,10 +75,6 @@ impl Brc20Transfer {
         }
     }
 
-    pub fn get_transfer_script(&self) -> &Brc20Inscription {
-        &self.inscription
-    }
-
     pub fn is_valid(&self) -> bool {
         self.is_valid
     }
@@ -84,14 +83,15 @@ impl Brc20Transfer {
         &mut self,
         mongo_client: &MongoClient,
         active_transfers: &mut Option<HashMap<(String, i64), Brc20ActiveTransfer>>,
-        user_balances: &mut HashMap<(String, String), Document>,
+        user_balances_to_update: &mut HashMap<(String, String), Document>,
+        user_balances_to_insert: &mut HashMap<(String, String), Document>,
         invalid_brc20_docs: &mut Vec<Document>,
     ) -> Result<UserBalanceEntry, Box<dyn std::error::Error>> {
         let ticker_symbol = &self.inscription.tick.to_lowercase();
         let mut user_balance_entry = UserBalanceEntry::default();
         let from = &self.from.to_string();
 
-        // get ticker doc from mongo
+        // Get the ticker document from MongoDB
         let ticker_doc_from_mongo = mongo_client
             .get_document_by_field(consts::COLLECTION_TICKERS, "tick", ticker_symbol)
             .await?;
@@ -109,88 +109,102 @@ impl Brc20Transfer {
             )));
         }
 
-        // get the user balance from the user_balances hashmap
-        let user_balance_from = get_user_balance(user_balances, &from, ticker_symbol);
+        // Get the user balance document from the hashmap
+        let user_balance_from =
+            user_balances_to_update.get_mut(&(from.clone(), ticker_symbol.clone()));
 
-        if let Some(mut user_balance) = user_balance_from.cloned() {
-            let available_balance = mongo_client
-                .get_double(&user_balance, "available_balance")
-                .unwrap_or_default();
+        let user_balance = match user_balance_from {
+            Some(user_balance) => user_balance,
+            None => {
+                // User balance not found in the hashmap, check the 'user_balances_to_insert' hashmap
+                let user_balance =
+                    user_balances_to_insert.get_mut(&(from.clone(), ticker_symbol.clone()));
 
-            // get transfer amount
-            let transfer_amount = self
-                .inscription
-                .amt
-                .as_ref()
-                .and_then(|amt_str| amt_str.parse::<f64>().ok())
-                .unwrap_or(0.0);
+                match user_balance {
+                    Some(user_balance) => user_balance,
+                    None => {
+                        // User balance not found in either hashmap, load it from the database
+                        let user_balance_doc = mongo_client
+                            .load_user_balance_with_retry(&(from.clone(), ticker_symbol.clone()))
+                            .await
+                            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-            // check if user has enough balance to transfer
-            if available_balance >= transfer_amount {
-                info!("VALID: Transfer inscription added. From: {:#?}", self.from);
-                self.is_valid = true;
+                        if let Some(doc) = user_balance_doc {
+                            user_balances_to_update
+                                .insert((from.clone(), ticker_symbol.clone()), doc.clone());
+                            user_balances_to_update
+                                .get_mut(&(from.clone(), ticker_symbol.clone()))
+                                .unwrap()
+                        } else {
+                            // User balance not found in the database either
+                            let reason = "User balance not found";
+                            error!("INVALID: {}", reason);
 
-                // insert user balance entry
-                user_balance_entry = mongo_client
-                    .insert_user_balance_entry(
-                        &self.from.to_string(),
-                        transfer_amount,
-                        ticker_symbol,
-                        self.block_height.into(),
-                        UserBalanceEntryType::Inscription,
-                    )
-                    .await?;
+                            self.insert_invalid_tx(reason, invalid_brc20_docs).await?;
 
-                // Get the available balance and transferable balance values
-                let available_balance = user_balance
-                    .get(consts::AVAILABLE_BALANCE)
-                    .and_then(Bson::as_f64)
-                    .unwrap_or_default();
-                let transferable_balance = user_balance
-                    .get(consts::TRANSFERABLE_BALANCE)
-                    .and_then(Bson::as_f64)
-                    .unwrap_or_default();
-
-                // Update the values
-                let updated_available_balance = available_balance - transfer_amount;
-                let updated_transferable_balance = transferable_balance + transfer_amount;
-
-                // Update the document
-                user_balance.insert(
-                    consts::AVAILABLE_BALANCE.to_string(),
-                    Bson::Double(updated_available_balance),
-                );
-                user_balance.insert(
-                    consts::TRANSFERABLE_BALANCE.to_string(),
-                    Bson::Double(updated_transferable_balance),
-                );
-
-                user_balances.insert((from.clone(), ticker_symbol.clone()), user_balance);
-
-                // Create new active transfer when inscription is valid
-                let active_transfer =
-                    Brc20ActiveTransfer::new(self.tx.txid.to_string(), 0, self.block_height.into());
-
-                // If active_transfers is None, create a new HashMap and assign it to active_transfers
-                if active_transfers.is_none() {
-                    *active_transfers = Some(HashMap::new());
+                            return Err(Box::new(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                reason,
+                            )));
+                        }
+                    }
                 }
-
-                // We know active_transfers is Some at this point, so we can unwrap it
-                active_transfers
-                    .as_mut()
-                    .unwrap()
-                    .insert((self.tx.txid.to_string(), 0), active_transfer);
-            } else {
-                // if invalid, add invalid tx and return
-                let reason = "Transfer amount exceeds available balance";
-                error!("INVALID: {}", reason);
-
-                self.insert_invalid_tx(reason, invalid_brc20_docs).await?;
             }
+        };
+
+        debug!(
+            "user_balance from validate_inscribe_transfer: {:?}",
+            user_balance
+        );
+
+        let available_balance = mongo_client
+            .get_double(&user_balance, "available_balance")
+            .unwrap_or_default();
+
+        // Get transfer amount
+        let transfer_amount = self
+            .inscription
+            .amt
+            .as_ref()
+            .and_then(|amt_str| amt_str.parse::<f64>().ok())
+            .unwrap_or(0.0);
+
+        // Check if the user has enough balance to transfer
+        if available_balance >= transfer_amount {
+            info!("VALID: Transfer inscription from: {:?}", self.from);
+            self.is_valid = true;
+
+            // Insert user balance entry
+            user_balance_entry = mongo_client
+                .insert_user_balance_entry(
+                    &self.from.to_string(),
+                    transfer_amount,
+                    ticker_symbol,
+                    self.block_height.into(),
+                    UserBalanceEntryType::Inscription,
+                )
+                .await?;
+
+            // Update the user balance document
+            update_sender_or_inscriber_user_balance_document(user_balance, &user_balance_entry)?;
+
+            // Create a new active transfer when the inscription is valid
+            let active_transfer =
+                Brc20ActiveTransfer::new(self.tx.txid.to_string(), 0, self.block_height.into());
+
+            // If active_transfers is None, create a new HashMap and assign it to active_transfers
+            if active_transfers.is_none() {
+                *active_transfers = Some(HashMap::new());
+            }
+
+            // We know active_transfers is Some at this point, so we can unwrap it
+            active_transfers
+                .as_mut()
+                .unwrap()
+                .insert((self.tx.txid.to_string(), 0), active_transfer);
         } else {
-            // User balance not found, create invalid transaction
-            let reason = "User balance not found";
+            // If invalid, add invalid tx and return
+            let reason = "Transfer amount exceeds available balance";
             error!("INVALID: {}", reason);
 
             self.insert_invalid_tx(reason, invalid_brc20_docs).await?;
@@ -226,6 +240,7 @@ pub async fn handle_transfer_operation(
     sender: Address,
     active_transfers: &mut Option<HashMap<(String, i64), Brc20ActiveTransfer>>,
     user_balances: &mut HashMap<(String, String), Document>,
+    user_balances_to_insert: &mut HashMap<(String, String), Document>,
     invalid_brc20_docs: &mut Vec<Document>,
 ) -> Result<(Brc20Transfer, UserBalanceEntry), Box<dyn std::error::Error>> {
     // Create a new transfer transaction
@@ -238,26 +253,12 @@ pub async fn handle_transfer_operation(
             mongo_client,
             active_transfers,
             user_balances,
+            user_balances_to_insert,
             invalid_brc20_docs,
         )
         .await?;
 
-    if validated_transfer_tx.is_valid() {
-        info!(
-            "Transfer: {:?}",
-            validated_transfer_tx.get_transfer_script()
-        );
-    }
-
     Ok((validated_transfer_tx, user_balance_entry))
-}
-
-pub fn get_user_balance<'a>(
-    user_balances: &'a HashMap<(String, String), Document>,
-    address: &'a String,
-    ticker_symbol: &'a String,
-) -> Option<&'a Document> {
-    user_balances.get(&(address.clone(), ticker_symbol.clone()))
 }
 
 impl ToDocument for Brc20Transfer {

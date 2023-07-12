@@ -1,5 +1,5 @@
 use super::ToDocument;
-use mongodb::bson::{doc, Bson, DateTime, Document};
+use mongodb::bson::{doc, Document};
 use serde::Serialize;
 use std::fmt;
 
@@ -10,6 +10,7 @@ pub struct UserBalance {
     pub overall_balance: f64,
     pub available_balance: f64,
     pub transferable_balance: f64,
+    pub block_height: u64,
 }
 
 impl ToDocument for UserBalance {
@@ -20,7 +21,7 @@ impl ToDocument for UserBalance {
             "overall_balance": self.overall_balance,
             "available_balance": self.available_balance,
             "transferable_balance": self.transferable_balance,
-            "created_at": Bson::DateTime(DateTime::now())
+            "block_height": self.block_height as i64,
         }
     }
 }
@@ -31,7 +32,7 @@ pub struct UserBalanceEntry {
     pub tick: String,
     pub block_height: u64,
     pub amt: f64,
-    pub entry_type: String,
+    pub entry_type: UserBalanceEntryType,
 }
 
 impl Default for UserBalanceEntry {
@@ -41,7 +42,7 @@ impl Default for UserBalanceEntry {
             tick: String::default(),
             block_height: 0,
             amt: 0.0,
-            entry_type: String::default(),
+            entry_type: UserBalanceEntryType::Inscription,
         }
     }
 }
@@ -59,7 +60,7 @@ impl UserBalanceEntry {
             tick,
             block_height,
             amt: amount,
-            entry_type: entry_type.to_string(), // Convert enum variant to String using Display trait
+            entry_type,
         };
         entry
     }
@@ -72,7 +73,7 @@ impl ToDocument for UserBalanceEntry {
             "tick": &self.tick,
             "block_height": self.block_height as i64,
             "amt": self.amt,
-            "entry_type": &self.entry_type,
+            "entry_type": &self.entry_type.to_string(),
         }
     }
 }

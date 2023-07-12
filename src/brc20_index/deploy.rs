@@ -237,10 +237,7 @@ pub async fn handle_deploy_operation(
         .await?;
 
     if validated_deploy_tx.is_valid() {
-        info!(
-            "VALID Deploy: {:?}",
-            validated_deploy_tx.get_deploy_script()
-        );
+        info!("VALID Deploy: {}", validated_deploy_tx.inscription);
 
         // A valid deploy means new BRC20Ticker to MongoDB
         // Instantiate a new `Brc20Ticker` struct and update the hashmap with the deploy information.
@@ -250,11 +247,6 @@ pub async fn handle_deploy_operation(
         mongo_client
             .insert_document(consts::COLLECTION_TICKERS, ticker.to_document())
             .await?;
-    } else {
-        error!(
-            "Invalid deploy: {:?}",
-            validated_deploy_tx.get_deploy_script()
-        );
     }
 
     Ok(validated_deploy_tx)

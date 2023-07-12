@@ -129,7 +129,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Call create_indexes after MongoClient has been initialized
     mongo_client.create_indexes().await?;
 
-    info!("Retrieving starting block height...");
     let start = Instant::now();
     // get block height to start indexing from
     let mut start_block_height = consts::BRC20_STARTING_BLOCK_HEIGHT; // default starting point
@@ -147,12 +146,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     warn!("Retrieved starting block height: {:?}", start.elapsed());
 
-    info!("Deleting incomplete records...");
-    let start = Instant::now();
-
     // if BRC20_STARTING_BLOCK_HEIGHT is < start_block_height, then we need to delete everything in db that is >= start_block_height
     // delete deploys, mints, transfers, inscriptions, tickers, invalids, entries
     if consts::BRC20_STARTING_BLOCK_HEIGHT < start_block_height {
+        info!("Deleting incomplete records...");
+        let start = Instant::now();
+
         let collections = vec![
             consts::COLLECTION_DEPLOYS,
             consts::COLLECTION_MINTS,
@@ -172,40 +171,67 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         warn!("Incomplete Block Records deleted: {:?}", start.elapsed());
 
+        info!("Resetting total_minted for selected tickers...");
         let start = Instant::now();
-        //recalculate total_minted for each ticker
-        info!("Recalculating total_minted for all tickers...");
         match mongo_client
-            .update_ticker_totals(start_block_height - 1)
+            .reset_tickers_total_minted(start_block_height)
             .await
         {
-            Ok(_) => {
-                warn!("Recalculation complete: {:?}", start.elapsed())
+            Ok(updated_tickers) => {
+                info!("Reset total_minted for the following tickers:");
+                for ticker in &updated_tickers {
+                    info!("{}", ticker);
+                }
+                warn!("Reset total_minted for tickers in: {:?}", start.elapsed());
+                updated_tickers
             }
-            Err(e) => error!("Error recalculating total_minted for all tickers: {:?}", e),
+            Err(e) => {
+                error!("Error resetting total_minted for tickers: {:?}", e);
+                Vec::new() // Return an empty vector if there is an error
+            }
         };
+
+        // let start = Instant::now();
+        // //recalculate total_minted for each ticker
+        // info!("Recalculating total_minted for all tickers...");
+        // match mongo_client
+        //     .update_ticker_totals(start_block_height - 1)
+        //     .await
+        // {
+        //     Ok(_) => {
+        //         warn!("Recalculation complete: {:?}", start.elapsed())
+        //     }
+        //     Err(e) => error!("Error recalculating total_minted for all tickers: {:?}", e),
+        // };
 
         info!("Deleting User Balances...");
         let start = Instant::now();
         //delete user balance collection
-        mongo_client
-            .drop_collection(consts::COLLECTION_USER_BALANCES)
-            .await?;
+        let deleted_user_balances = mongo_client
+            .delete_user_balances_by_block_height(start_block_height)
+            .await;
+        info!("Deleted User Balances: {:?}", deleted_user_balances);
 
         warn!("User Balances Deleted: {:?}", start.elapsed());
 
         // rebuild userbalances
         info!("Rebuilding User Balances...");
         let start = Instant::now();
-        match mongo_client
-            .rebuild_user_balances(start_block_height - 1)
-            .await
-        {
-            Ok(_) => {
-                warn!("User Balances rebuilt: {:?}", start.elapsed());
+        match deleted_user_balances {
+            Ok(deleted_balances) => {
+                // Call the `rebuild_deleted_user_balances` function
+                let rebuilt_result = mongo_client
+                    .rebuild_deleted_user_balances(start_block_height, deleted_balances)
+                    .await;
+                if let Err(err) = rebuilt_result {
+                    error!("Failed to rebuild user balances: {:?}", err);
+                }
             }
-            Err(e) => error!("Error recreating userbalances: {:?}", e),
-        };
+            Err(err) => {
+                error!("Failed to delete user balances: {:?}", err);
+            }
+        }
+        warn!("User Balances Rebuilt: {:?}", start.elapsed());
     }
 
     // LFG!
