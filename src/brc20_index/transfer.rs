@@ -8,7 +8,7 @@ use crate::brc20_index::{
 };
 use bitcoin::Address;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult;
-use log::{error, info};
+use log::{debug, error, info};
 use mongodb::bson::{doc, Bson, DateTime, Document};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -83,7 +83,7 @@ impl Brc20Transfer {
         &mut self,
         mongo_client: &MongoClient,
         active_transfers: &mut Option<HashMap<(String, i64), Brc20ActiveTransfer>>,
-        user_balances: &mut HashMap<(String, String), Document>,
+        user_balances_to_update: &mut HashMap<(String, String), Document>,
         user_balances_to_insert: &mut HashMap<(String, String), Document>,
         invalid_brc20_docs: &mut Vec<Document>,
     ) -> Result<UserBalanceEntry, Box<dyn std::error::Error>> {
@@ -110,7 +110,8 @@ impl Brc20Transfer {
         }
 
         // Get the user balance document from the hashmap
-        let user_balance_from = user_balances.get_mut(&(from.clone(), ticker_symbol.clone()));
+        let user_balance_from =
+            user_balances_to_update.get_mut(&(from.clone(), ticker_symbol.clone()));
 
         let user_balance = match user_balance_from {
             Some(user_balance) => user_balance,
@@ -129,9 +130,9 @@ impl Brc20Transfer {
                             .map_err(|e| anyhow::anyhow!("{}", e))?;
 
                         if let Some(doc) = user_balance_doc {
-                            user_balances
+                            user_balances_to_update
                                 .insert((from.clone(), ticker_symbol.clone()), doc.clone());
-                            user_balances
+                            user_balances_to_update
                                 .get_mut(&(from.clone(), ticker_symbol.clone()))
                                 .unwrap()
                         } else {
@@ -151,7 +152,7 @@ impl Brc20Transfer {
             }
         };
 
-        info!(
+        debug!(
             "user_balance from validate_inscribe_transfer: {:?}",
             user_balance
         );
@@ -170,7 +171,7 @@ impl Brc20Transfer {
 
         // Check if the user has enough balance to transfer
         if available_balance >= transfer_amount {
-            info!("VALID: Transfer inscription added. From: {:?}", self.from);
+            info!("VALID: Transfer inscription from: {:?}", self.from);
             self.is_valid = true;
 
             // Insert user balance entry

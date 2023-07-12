@@ -150,7 +150,7 @@ pub fn transaction_inputs_to_values(client: &Client, inputs: &[TxIn]) -> anyhow:
 
 pub async fn update_receiver_balance_document(
     mongo_client: &MongoClient,
-    user_balance_docs: &mut HashMap<(String, String), Document>,
+    user_balance_docs_to_update: &mut HashMap<(String, String), Document>,
     user_balance_docs_to_insert: &mut HashMap<(String, String), Document>,
     user_balance_entry: &UserBalanceEntry,
 ) -> Result<(), anyhow::Error> {
@@ -160,8 +160,8 @@ pub async fn update_receiver_balance_document(
         user_balance_entry.tick.clone(),
     );
 
-    // Check if the user balance document exists in the 'user_balance_docs' hashmap
-    if let Some(user_balance) = user_balance_docs.get_mut(&key) {
+    // Check if the user balance document exists in the 'user_balance_docs_to_update' hashmap
+    if let Some(user_balance) = user_balance_docs_to_update.get_mut(&key) {
         // Document found in 'user_balance_docs', update it
         debug!(
             "Updating existing user balance document: {:?}",
@@ -191,7 +191,7 @@ pub async fn update_receiver_balance_document(
                     user_balance
                 );
                 update_receiver(
-                    user_balance_docs
+                    user_balance_docs_to_update
                         .entry(key.clone())
                         .or_insert_with(|| user_balance.clone()),
                     user_balance_entry,

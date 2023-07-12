@@ -1,9 +1,6 @@
-use super::mongo::MongoClient;
-use super::{consts, ToDocument};
-use log::{info, warn};
+use super::ToDocument;
 use mongodb::bson::{doc, Document};
 use serde::Serialize;
-use std::collections::HashMap;
 use std::fmt;
 
 #[derive(Debug, Clone, Serialize)]
@@ -109,50 +106,4 @@ impl From<&str> for UserBalanceEntryType {
             _ => panic!("Invalid UserBalanceEntryType"),
         }
     }
-}
-
-pub async fn update_user_balances(
-    mongo_client: &MongoClient,
-    user_balance_docs: HashMap<(String, String), Document>,
-    user_balance_docs_to_insert: HashMap<(String, String), Document>,
-) -> Result<(), anyhow::Error> {
-    let collection_name = consts::COLLECTION_USER_BALANCES;
-
-    //time the process
-    let start = std::time::Instant::now();
-    let len = user_balance_docs.len();
-    // Update user balance documents
-    for (key, document) in user_balance_docs {
-        let filter = doc! {
-            "address": key.0,
-            "tick": key.1,
-        };
-
-        let update = doc! {
-            "$set": document,
-        };
-
-        mongo_client
-            .update_one_with_retries(collection_name, filter, update, None)
-            .await?;
-    }
-    warn!("Updated {} user balances in: {:?}", len, start.elapsed());
-
-    // Insert new user balance documents using insert_many_with_retries
-    let documents_to_insert: Vec<Document> =
-        user_balance_docs_to_insert.values().cloned().collect();
-    if !documents_to_insert.is_empty() {
-        let start = std::time::Instant::now();
-        mongo_client
-            .insert_many_with_retries(collection_name, &documents_to_insert)
-            .await?;
-
-        info!(
-            "Inserted {} User Balances in {:?}",
-            documents_to_insert.len(),
-            start.elapsed()
-        );
-    }
-
-    Ok(())
 }

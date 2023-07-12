@@ -7,7 +7,7 @@ use super::user_balance::{UserBalanceEntry, UserBalanceEntryType};
 use crate::brc20_index::consts;
 use futures_util::stream::TryStreamExt;
 use futures_util::StreamExt;
-use log::error;
+use log::{error, info, warn};
 use mongodb::bson::{doc, Bson, DateTime, Document};
 use mongodb::options::{FindOneOptions, FindOptions, IndexOptions, UpdateOptions};
 use mongodb::{bson, options::ClientOptions, Client};
@@ -596,7 +596,7 @@ impl MongoClient {
         &self,
         start_block_height: i64,
     ) -> Result<Vec<(String, String)>, anyhow::Error> {
-        let filter = doc! { "block_height": { "$gte": start_block_height } };
+        let filter = doc! { "block_height": { "$gte": start_block_height }};
 
         let mut deleted_user_balances = Vec::new();
 
@@ -769,6 +769,50 @@ impl MongoClient {
         let update = doc! { "$set": update_doc};
         let filter = doc! { "tick": tick };
         tickers_coll.update_one(filter, update, None).await?;
+
+        Ok(())
+    }
+
+    pub async fn update_user_balances(
+        &self,
+        user_balance_docs_to_update: HashMap<(String, String), Document>,
+        user_balance_docs_to_insert: HashMap<(String, String), Document>,
+    ) -> Result<(), anyhow::Error> {
+        let collection_name = consts::COLLECTION_USER_BALANCES;
+
+        //time the process
+        let start = std::time::Instant::now();
+        let len = user_balance_docs_to_update.len();
+        // Update user balance documents
+        for (key, document) in user_balance_docs_to_update {
+            let filter = doc! {
+                "address": key.0,
+                "tick": key.1,
+            };
+
+            let update = doc! {
+                "$set": document,
+            };
+
+            self.update_one_with_retries(collection_name, filter, update, None)
+                .await?;
+        }
+        warn!("Updated {} user balances in: {:?}", len, start.elapsed());
+
+        // Insert new user balance documents using insert_many_with_retries
+        let documents_to_insert: Vec<Document> =
+            user_balance_docs_to_insert.values().cloned().collect();
+        if !documents_to_insert.is_empty() {
+            let start = std::time::Instant::now();
+            self.insert_many_with_retries(collection_name, &documents_to_insert)
+                .await?;
+
+            info!(
+                "Inserted {} User Balances in {:?}",
+                documents_to_insert.len(),
+                start.elapsed()
+            );
+        }
 
         Ok(())
     }
